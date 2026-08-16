@@ -17,7 +17,8 @@ from optimizer.funnel import Funnel, StageMetrics
 from optimizer.plan import (
     Aggregate, AggSpec, Collapse, Column, Derivation, ExactFilter, Expand, Limit,
     Materialize, PlanNode, PlanWarning, PredicateClass, Project, Provenance, Retrieve,
-    Scan, SelectivitySource, SemanticFilter, SemanticJoin, Snapshot, Union,
+    PushedPredicate, Scan, SelectivitySource, SemanticFilter, SemanticJoin,
+    Snapshot, Union,
     children, grain, is_filter, observed_fields, pipeline, walk,
 )
 
@@ -303,7 +304,9 @@ def node_json(n: PlanNode) -> dict[str, Any]:
     match n:
         case Scan():
             return base | {'node': 'scan', 'tables': list(n.tables), 'sql': n.sql,
-                           'params': list(n.params), 'pushed': list(n.pushed),
+                           'params': list(n.params),
+                           'pushed': [{'display': x.display, 'sql': x.sql,
+                                       'params': list(x.params)} for x in n.pushed],
                            'selectivity': n.selectivity,
                            'selectivity_source': n.selectivity_source.value}
         case ExactFilter():
@@ -363,7 +366,9 @@ def node_of(d: dict[str, Any]) -> PlanNode:
     match d['node']:
         case 'scan':
             return Scan(nid, tuple(d['tables']), d['sql'], tuple(d['params']),
-                        tuple(d['pushed']), d['selectivity'],
+                        tuple(PushedPredicate(x['display'], x['sql'], tuple(x['params']))
+                              for x in d['pushed']),
+                        d['selectivity'],
                         SelectivitySource(d['selectivity_source']), g)
         case 'exact_filter':
             return ExactFilter(nid, d['predicate'], d['sql'], tuple(d['params']),

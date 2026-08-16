@@ -556,8 +556,20 @@
                                                       "490 U.S. 386"
                                                     ],
                                                     "pushed": [
-                                                      "docket.court_id = \"ca9\"",
-                                                      "citation.cited_cite = \"490 U.S. 386\""
+                                                      {
+                                                        "display": "docket.court_id = \"ca9\"",
+                                                        "sql": "docket.court_id = ?",
+                                                        "params": [
+                                                          "ca9"
+                                                        ]
+                                                      },
+                                                      {
+                                                        "display": "citation.cited_cite = \"490 U.S. 386\"",
+                                                        "sql": "citation.cited_cite = ?",
+                                                        "params": [
+                                                          "490 U.S. 386"
+                                                        ]
+                                                      }
                                                     ],
                                                     "selectivity": 0.0081875,
                                                     "selectivity_source": "probed"
@@ -959,8 +971,20 @@
                                                       "490 U.S. 386"
                                                     ],
                                                     "pushed": [
-                                                      "docket.court_id = \"ca9\"",
-                                                      "citation.cited_cite = \"490 U.S. 386\""
+                                                      {
+                                                        "display": "docket.court_id = \"ca9\"",
+                                                        "sql": "docket.court_id = ?",
+                                                        "params": [
+                                                          "ca9"
+                                                        ]
+                                                      },
+                                                      {
+                                                        "display": "citation.cited_cite = \"490 U.S. 386\"",
+                                                        "sql": "citation.cited_cite = ?",
+                                                        "params": [
+                                                          "490 U.S. 386"
+                                                        ]
+                                                      }
                                                     ],
                                                     "selectivity": 0.0081875,
                                                     "selectivity_source": "probed"
@@ -1362,8 +1386,20 @@
                                                       "490 U.S. 386"
                                                     ],
                                                     "pushed": [
-                                                      "docket.court_id = \"ca9\"",
-                                                      "citation.cited_cite = \"490 U.S. 386\""
+                                                      {
+                                                        "display": "docket.court_id = \"ca9\"",
+                                                        "sql": "docket.court_id = ?",
+                                                        "params": [
+                                                          "ca9"
+                                                        ]
+                                                      },
+                                                      {
+                                                        "display": "citation.cited_cite = \"490 U.S. 386\"",
+                                                        "sql": "citation.cited_cite = ?",
+                                                        "params": [
+                                                          "490 U.S. 386"
+                                                        ]
+                                                      }
                                                     ],
                                                     "selectivity": 0.0081875,
                                                     "selectivity_source": "probed"

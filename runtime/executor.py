@@ -267,15 +267,30 @@ def _plan_scan_query(root: PlanNode, scan: Scan) -> tuple[str, tuple]:
     where: list[str] = []
     params: list[Any] = []
     has_semantic = False
+
+    def push(sql: str, ps: tuple) -> None:
+        """Re-apply one deterministic predicate as a store-native WHERE clause.
+
+        Uses the parameterized relational form rather than reparsing the display-only BQL
+        predicate, so strings, numbers and Date literals all arrive already unwrapped."""
+        m = _SQL_CMP.match((sql or "").strip())
+        if (m and m["op"] == "=" and len(ps) == 1
+                and m["lhs"].split(".")[-1] in _INDEXED_COLS):
+            where.append(f'{m["lhs"].split(".")[-1]} = ?')
+            params.append(ps[0])
+
+    # Predicates the optimizer already absorbed into the Scan. This list is the only
+    # surviving record of them: pushdown *deletes* the ExactFilter nodes, and this backend
+    # ignores scan.sql because the store keeps records as JSON blobs rather than columns.
+    # Reading only the tree below would mean an optimized plan pushes nothing at all.
+    for pp in scan.pushed:
+        push(pp.sql, pp.params)
+
     for n in walk(root):
         if isinstance(n, ExactFilter):
-            # Use the parameterized relational form instead of reparsing the display-only
-            # BQL predicate. This stays correct for strings, numbers, and Date literals.
-            m = _SQL_CMP.match((n.sql or "").strip())
-            if (m and m["op"] == "=" and len(n.params) == 1
-                    and m["lhs"].split(".")[-1] in _INDEXED_COLS):
-                where.append(f'{m["lhs"].split(".")[-1]} = ?')
-                params.append(n.params[0])
+            # Predicates pushdown could not absorb — over expanded elements, or above a
+            # blocking aggregate — still standing as operators.
+            push(n.sql, n.params)
         elif isinstance(n, SemanticFilter):
             has_semantic = True
             if n.predicate_class == PredicateClass.SEM and n.field.path:

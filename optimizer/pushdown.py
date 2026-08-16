@@ -19,8 +19,8 @@ from dataclasses import replace
 from typing import Callable
 
 from optimizer.plan import (
-    Aggregate, Collapse, ExactFilter, Expand, PlanNode, PlanWarning, Scan,
-    SelectivitySource, Union,
+    Aggregate, Collapse, ExactFilter, Expand, PlanNode, PlanWarning, PushedPredicate,
+    Scan, SelectivitySource, Union,
 )
 from optimizer.plan_editing import with_children
 
@@ -133,5 +133,6 @@ def _absorb(scan: Scan, carry: tuple[ExactFilter, ...], probe: Prober | None,
             source = SelectivitySource.PROBED
 
     return replace(scan, sql=sql, params=(*scan.params, *params),
-                   pushed=(*scan.pushed, *(f.predicate for f in carry)),
+                   pushed=(*scan.pushed,
+                           *(PushedPredicate(f.predicate, f.sql, f.params) for f in carry)),
                    selectivity=selectivity, selectivity_source=source)

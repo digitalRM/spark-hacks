@@ -82,6 +82,19 @@ class Column:
 # ---------------------------------------------------------------------------
 
 @dataclass(frozen=True)
+class PushedPredicate:
+    """One deterministic predicate that pushdown absorbed into a Scan.
+
+    Kept structurally rather than as a concatenated string, because a backend that is not
+    SQLite-over-real-columns has to re-apply these itself. The JSON-blob store, for one,
+    ignores Scan.sql entirely and builds its own SELECT — so if the only surviving record
+    of a pushed predicate were prose on a node card, pushing it down would mean *losing*
+    it. `display` is for humans; `sql` and `params` are what a backend re-applies."""
+    display: str
+    sql: str
+    params: tuple[Any, ...]
+
+@dataclass(frozen=True)
 class Scan:
     """Read from the local index. Pushed-down EXACT predicates and equality joins along
     foreign keys collapse into one SQL statement. Zero model calls.
@@ -93,7 +106,7 @@ class Scan:
     tables: tuple[str, ...]
     sql: str
     params: tuple[Any, ...]
-    pushed: tuple[str, ...]        # printed predicates absorbed into the SQL
+    pushed: tuple[PushedPredicate, ...]   # predicates absorbed into the SQL
     selectivity: float
     selectivity_source: SelectivitySource
     scan_grain: Grain
