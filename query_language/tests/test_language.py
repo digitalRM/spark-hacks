@@ -368,6 +368,8 @@ class TestRelevanceGate(unittest.TestCase):
         self.assertEqual(seen["kwargs"]["temperature"], 0.0)
         self.assertEqual(seen["kwargs"]["max_tokens"], relevance.MAX_TOKENS)
         self.assertIs(seen["kwargs"]["enable_thinking"], False)
+        self.assertIn('"hi" -> {"is_legal": false}', seen["messages"][0]["content"])
+        self.assertIn("affirmative evidence", seen["messages"][0]["content"])
 
     def test_invalid_classifier_shape_fails_closed(self):
         with self.assertRaises(client.ModelError):
@@ -402,6 +404,7 @@ class TestRelevanceGate(unittest.TestCase):
 
     def test_mock_gate_handles_legal_and_unrelated_inputs(self):
         self.assertTrue(relevance._mock_is_legal("Find cases about qualified immunity"))
+        self.assertFalse(relevance._mock_is_legal("hi"))
         self.assertFalse(relevance._mock_is_legal("Give me a chocolate cake recipe"))
 
 

@@ -17,9 +17,9 @@ from . import client
 ENABLED = os.environ.get("BQL_RELEVANCE_ENABLED", "1").lower() in {
     "1", "true", "yes", "on",
 }
-MAX_TOKENS = int(os.environ.get("BQL_RELEVANCE_MAX_TOKENS", "64"))
-TIMEOUT_S = float(os.environ.get("BQL_RELEVANCE_TIMEOUT_S", "30"))
-MAX_RETRIES = int(os.environ.get("BQL_RELEVANCE_MAX_RETRIES", "2"))
+MAX_TOKENS = int(os.environ.get("BQL_RELEVANCE_MAX_TOKENS", "32"))
+TIMEOUT_S = float(os.environ.get("BQL_RELEVANCE_TIMEOUT_S", "3"))
+MAX_RETRIES = int(os.environ.get("BQL_RELEVANCE_MAX_RETRIES", "1"))
 REJECTION_MESSAGE = os.environ.get(
     "BQL_RELEVANCE_MESSAGE",
     "I'm sorry! It looks like your request isn't related to legal research or "
@@ -29,19 +29,27 @@ REJECTION_MESSAGE = os.environ.get(
 
 SYSTEM_PROMPT = """\
 # legal_relevance_gate
-Decide whether the user's input belongs in a legal-research and court-record
-search application.
+You are a strict binary domain gate for a court-case and legal-record search
+application.
 
-Return true for requests involving court cases, opinions, dockets, judges,
-citations, evidence, hearings, legal doctrines, statutes, regulations, contracts,
+Return true only when the user's words provide affirmative evidence of a legal or
+court-record request. This includes court cases, opinions, dockets, judges,
+citations, hearings, evidence, legal doctrines, statutes, regulations, contracts,
 legal rights or duties, legal disputes, or searches/filters over legal records.
-Short fragments, case names, citations, and plausibly legal follow-up requests
-should be true. When genuinely uncertain, prefer true so a valid legal query is
-not blocked.
 
-Return false only when the request is clearly unrelated to law or legal research,
-such as recipes, entertainment, weather, casual conversation, shopping, or a
-general knowledge question with no legal connection.
+Return false when the input has no explicit legal meaning. Greetings,
+acknowledgements, casual conversation, vague requests, arbitrary words or names,
+recipes, entertainment, weather, shopping, and general knowledge are false. Do
+not assume an input is legal merely because it was entered in a legal-search app.
+If the text is ambiguous and contains no recognizable legal signal, return false.
+
+Examples:
+"hi" -> {"is_legal": false}
+"can you help me?" -> {"is_legal": false}
+"Smith" -> {"is_legal": false}
+"qualified immunity" -> {"is_legal": true}
+"Roe v. Wade" -> {"is_legal": true}
+"42 U.S.C. 1983 cases" -> {"is_legal": true}
 
 Output exactly one JSON object and nothing else:
 {"is_legal": true}
