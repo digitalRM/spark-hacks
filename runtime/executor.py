@@ -1,30 +1,448 @@
-"""Stage 5 -- execute an ExecutionPlan against the corpus. Not built yet.
+"""Stage 5 -- execute an ExecutionPlan against the corpus.
 
-`api.driver` reports the execute stage as `stub` for as long as `execute` raises
-NotImplementedError, so the rest of the pipeline stays runnable. Filling
-it in means dispatching every plan node through one ExecutionContext protocol with three
-backend families behind it -- relational (compile the node to SQL), bespoke (rasterize,
-segment, vector search, blocking) and semantic (invoke a model) -- and recording items in,
-items out, wall clock, model calls and cache hits per stage.
+Fills the `runtime.executor.execute(plan) -> dict` seam that api.driver imports. The
+plan is the operator tree from optimizer/plan.py (as JSON or as PlanNode objects); this
+walks it bottom-up -- leaves read, the root emits -- through three backend families the
+original stub named:
 
-The driver needs exactly one name from this module:
+    relational  Scan / ExactFilter         SQL + Python over the local index; zero model calls
+    bespoke     Expand / Collapse / Limit  grain and cardinality moves; zero model calls
+    semantic    SemanticFilter             one model call per record, to the plan's bound model
 
-    execute(plan) -> dict   the results and per-stage telemetry, JSON-ready
+The plan says WHICH model each semantic node uses (bound_model, a calibration key) and
+WHAT data it reads (field, a FieldRef path). This module resolves the first to a real
+endpoint (model_endpoints.resolve) and the second against the record, applies the model's
+hard context limit, records a funnel row per node, and renders each surviving record with
+citable evidence links.
+
+Coverage is honest and partial: Scan, ExactFilter, SemanticFilter, Expand, Collapse, Limit
+and Project run; Retrieve, Materialize, Aggregate, Union and SemanticJoin raise a precise
+NotImplementedError naming what is missing, so a plan that needs them fails loudly instead
+of lying. That is enough to run the Scan -> SEM -> Limit -> Project path end to end.
 """
 from __future__ import annotations
 
+import asyncio
+import json
+import re
+import sys
+import time
+from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
-# Read by GET /health, so it can say `stub` without calling the executor to find out.
-# Delete this line when `execute` actually executes.
-STUB = True
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+for _p in (Path(__file__).resolve().parent, _REPO_ROOT, _REPO_ROOT / "data_ingestion"):
+    if str(_p) not in sys.path:
+        sys.path.insert(0, str(_p))
 
-def execute(plan: Any) -> dict[str, Any]:
-    """Run an ExecutionPlan and return results plus per-stage telemetry.
+from data_ingestion.dataform.models import AudioAsset, Document, ImageAsset  # noqa: E402
+from data_ingestion.dataform.store import Store  # noqa: E402
+from optimizer.plan import (  # noqa: E402
+    Aggregate, Collapse, Column, ExactFilter, Expand, Limit, Materialize, PlanNode,
+    PredicateClass, Project, Retrieve, Scan, SemanticFilter, SemanticJoin, Union, grain,
+)
+from optimizer.plan_editing import node_of  # noqa: E402  JSON -> PlanNode
+from query_language.ast import FieldRef  # noqa: E402
 
-    Cost: the whole query. Every other stage in the pipeline is planning; this is the one
-    that spends the wall clock the estimator has been predicting.
-    """
-    raise NotImplementedError(
-        'runtime.executor.execute: the executor is not built yet -- see the module docstring'
-    )
+import model_endpoints  # noqa: E402  sibling module
+
+# The executor is real now; the driver's seam_status stops reporting `stub`.
+STUB = False
+
+
+# ---------------------------------------------------------------------------
+# Records flowing through the tree
+# ---------------------------------------------------------------------------
+
+_ENVELOPE_FIELDS = {"id", "source_system", "source_id", "source_url",
+                    "ingested_at", "effective_date", "version", "external_ids"}
+
+
+@dataclass
+class Row:
+    """One record at some grain. `doc` is the base entity; `element` is the currently
+    unnested sub-value (a page/segment) after an Expand, or None at base grain."""
+    doc: Document
+    element: Any = None
+    evidence: list[dict] = field(default_factory=list)
+
+    def value(self, ref: FieldRef) -> Any:
+        # An unnested field resolves to the current element; everything else walks the doc.
+        if self.element is not None and ref.path and ref.path[-1] in ("scan_pages", "segments",
+                                                                       "images", "audio"):
+            return self.element
+        return _walk(self.doc, ref.path)
+
+
+def _walk(obj: Any, path: tuple[str, ...]) -> Any:
+    if not path:
+        return obj
+    head, *rest = path
+    # schema.py flattens RecordEnvelope fields onto each table; the pydantic object nests them.
+    if head in _ENVELOPE_FIELDS and hasattr(obj, "envelope"):
+        cur = getattr(obj.envelope, head, None)
+    else:
+        cur = getattr(obj, head, None)
+    for key in rest:
+        if cur is None:
+            return None
+        cur = getattr(cur, key, None)
+    return cur
+
+
+# ---------------------------------------------------------------------------
+# Telemetry
+# ---------------------------------------------------------------------------
+
+@dataclass
+class _Stage:
+    node_id: str
+    rows_in: float
+    rows_out: float
+    model_calls: float = 0.0
+    remote_calls: float = 0.0
+    seconds: float = 0.0
+    cache_hits: int = 0
+    degraded: int = 0
+
+
+@dataclass
+class _Ctx:
+    store: Store
+    stages: list[_Stage] = field(default_factory=list)
+    memo: dict[tuple, tuple[bool, float, str]] = field(default_factory=dict)  # (model,text,content)->verdict
+
+    def record(self, s: _Stage) -> None:
+        self.stages.append(s)
+
+
+# ---------------------------------------------------------------------------
+# Semantic backend: one model call per record, to the plan's bound model
+# ---------------------------------------------------------------------------
+
+_THINK = re.compile(r"<think>.*?</think>", re.DOTALL)
+_JSON = re.compile(r"\{.*\}", re.DOTALL)
+
+_JUDGE_SYSTEM = (
+    "You are a strict binary classifier for a legal search system. Given a PREDICATE and "
+    "CONTENT, decide whether the content satisfies the predicate. Respond with ONLY a JSON "
+    'object: {"match": true|false, "confidence": 0.0-1.0, "rationale": "<one sentence>"}.'
+)
+
+
+def _parse_verdict(raw: str) -> tuple[bool, float, str]:
+    m = _JSON.search(_THINK.sub("", raw).strip())
+    if not m:
+        return False, 0.0, "unparseable"
+    try:
+        d = json.loads(m.group(0))
+        return bool(d.get("match", False)), float(d.get("confidence", 0.0)), str(d.get("rationale", ""))
+    except (json.JSONDecodeError, TypeError, ValueError):
+        return False, 0.0, "malformed"
+
+
+def _extract_content(row: Row, node: SemanticFilter) -> tuple[str, str | None, dict]:
+    """Return (text_content, image_ref, evidence_stub) for the field this node reads."""
+    val = row.value(node.field)
+    if isinstance(val, ImageAsset):
+        loc = f"page {val.page_number}" if val.page_number else "exhibit"
+        return "", val.image_ref, {"kind": "image", "label": loc, "ref": val.image_ref}
+    if isinstance(val, AudioAsset):
+        text = val.transcript or " ".join(s.get("text", "") for s in val.timestamp_index if s.get("text"))
+        return text, None, {"kind": "audio", "label": "oral argument", "ref": val.audio_ref}
+    if isinstance(val, str):
+        label = node.field.path[-1] if node.field.path else "text"
+        return val, None, {"kind": "text", "label": label, "ref": None}
+    return "", None, {"kind": "text", "label": "text", "ref": None}
+
+
+async def _judge(ep, content: str, image_ref: str | None, predicate: str, client) -> tuple[bool, float, str]:
+    if image_ref is not None:
+        messages = [{"role": "system", "content": _JUDGE_SYSTEM},
+                    {"role": "user", "content": [
+                        {"type": "text", "text": f"PREDICATE: {predicate}"},
+                        {"type": "image_url", "image_url": {"url": image_ref}}]}]
+    else:
+        content = content[: ep.max_input_chars]  # the hard context limit, enforced here
+        messages = [{"role": "system", "content": _JUDGE_SYSTEM},
+                    {"role": "user", "content": f"PREDICATE: {predicate}\n\nCONTENT:\n{content}"}]
+    resp = await client.chat.completions.create(model=ep.model_id, messages=messages, temperature=0)
+    return _parse_verdict(resp.choices[0].message.content or "")
+
+
+async def _run_semantic(node: SemanticFilter, rows: list[Row], ctx: _Ctx) -> list[Row]:
+    from openai import AsyncOpenAI
+    ep = model_endpoints.resolve(node.bound_model)
+    if node.predicate_class.value.upper() not in ep.serves:
+        raise ValueError(f"{node.node_id}: {node.bound_model} cannot serve "
+                         f"{node.predicate_class.value.upper()}")
+    client = AsyncOpenAI(base_url=ep.base_url, api_key="not-needed-locally")
+    sem = asyncio.Semaphore(4 if not ep.is_remote else 2)
+    stage = _Stage(node.node_id, rows_in=len(rows), rows_out=0)
+    t0 = time.perf_counter()
+
+    async def judge_row(row: Row) -> Row | None:
+        content, image_ref, ev = _extract_content(row, node)
+        if not content and image_ref is None:
+            return None
+        key = (ep.model_id, node.text, content[:512], image_ref)
+        if key in ctx.memo:
+            match, conf, why = ctx.memo[key]
+            stage.cache_hits += 1
+        else:
+            async with sem:
+                match, conf, why = await _judge(ep, content, image_ref, node.text, client)
+            stage.model_calls += 1
+            if ep.is_remote:
+                stage.remote_calls += 1
+            ctx.memo[key] = (match, conf, why)
+        if node.negated:
+            match = not match
+        if match:
+            ev = {**ev, "quote": why, "confidence": conf}
+            return Row(row.doc, row.element, row.evidence + [ev])
+        return None
+
+    judged = await asyncio.gather(*(judge_row(r) for r in rows))
+    survivors = [r for r in judged if r is not None]
+    stage.rows_out = len(survivors)
+    stage.seconds = time.perf_counter() - t0
+    ctx.record(stage)
+    return survivors
+
+
+# ---------------------------------------------------------------------------
+# Tree walk
+# ---------------------------------------------------------------------------
+
+def _scan(node: Scan, ctx: _Ctx) -> list[Row]:
+    """Run the node's SQL against the store and parse each row's JSON blob into a Document.
+
+    The store is one-table-per-entity with a `data` JSON column, so a Scan over the
+    dataform corpus selects `data` and we revive the pydantic object. (The relational
+    cluster/docket schema the courtlistener fixtures assume is a different physical layout
+    -- see the deployment notes; this path targets the ingested dataform db.)"""
+    t0 = time.perf_counter()
+    cur = ctx.store.conn.execute(node.sql, node.params)
+    rows = [Row(Document.model_validate_json(r["data"])) for r in cur.fetchall()]
+    ctx.record(_Stage(node.node_id, rows_in=len(rows), rows_out=len(rows),
+                      seconds=time.perf_counter() - t0))
+    return rows
+
+
+_EXACT_RE = re.compile(r'EXACT\((?P<lhs>[\w.]+)\s*(?P<op>=|>=|<=|>|<)\s*"(?P<rhs>[^"]*)"\)')
+
+
+def _exact_filter(node: ExactFilter, rows: list[Row], ctx: _Ctx) -> list[Row]:
+    """Final plans push EXACT into the Scan, so this only fires on pre-pushdown plans.
+    Handles the common `field OP "literal"` shape; anything else passes through, flagged."""
+    m = _EXACT_RE.search(node.predicate)
+    degraded = 0
+    if m is None:
+        survivors, degraded = rows, len(rows)  # can't evaluate -> passthrough, but say so
+    else:
+        path = tuple(m["lhs"].split(".")[1:])
+        op, rhs = m["op"], m["rhs"]
+
+        def keep(r: Row) -> bool:
+            v = _walk(r.doc, path)
+            v = getattr(v, "value", v)
+            if v is None:
+                return False
+            s = str(v)
+            return {"=": s == rhs, ">=": s >= rhs, "<=": s <= rhs, ">": s > rhs, "<": s < rhs}[op]
+
+        survivors = [r for r in rows if keep(r)]
+    ctx.record(_Stage(node.node_id, rows_in=len(rows), rows_out=len(survivors), degraded=degraded))
+    return survivors
+
+
+def _expand(node: Expand, rows: list[Row], ctx: _Ctx) -> list[Row]:
+    out: list[Row] = []
+    for r in rows:
+        coll = _walk(r.doc, node.field.path) or []
+        for el in (coll if isinstance(coll, list) else [coll]):
+            out.append(Row(r.doc, element=el, evidence=list(r.evidence)))
+    ctx.record(_Stage(node.node_id, rows_in=len(rows), rows_out=len(out)))
+    return out
+
+
+def _collapse(node: Collapse, rows: list[Row], ctx: _Ctx) -> list[Row]:
+    seen: set[str] = set()
+    out: list[Row] = []
+    for r in rows:
+        key = r.doc.envelope.id
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(Row(r.doc, element=None, evidence=r.evidence))
+    ctx.record(_Stage(node.node_id, rows_in=len(rows), rows_out=len(out)))
+    return out
+
+
+def _limit(node: Limit, rows: list[Row], ctx: _Ctx) -> list[Row]:
+    out = rows[: node.k]
+    ctx.record(_Stage(node.node_id, rows_in=len(rows), rows_out=len(out)))
+    return out
+
+
+async def _eval(node: PlanNode, ctx: _Ctx) -> list[Row]:
+    match node:
+        case Scan():
+            return _scan(node, ctx)
+        case ExactFilter():
+            return _exact_filter(node, await _eval(node.child, ctx), ctx)
+        case SemanticFilter():
+            return await _run_semantic(node, await _eval(node.child, ctx), ctx)
+        case Expand():
+            return _expand(node, await _eval(node.child, ctx), ctx)
+        case Collapse():
+            return _collapse(node, await _eval(node.child, ctx), ctx)
+        case Limit():
+            return _limit(node, await _eval(node.child, ctx), ctx)
+        case Project():
+            return await _eval(node.child, ctx)  # projection shapes output, doesn't filter
+        case Retrieve():
+            raise NotImplementedError(
+                f"{node.node_id}: Retrieve (embed+rerank on :8002/:8003) not wired yet")
+        case Materialize():
+            raise NotImplementedError(
+                f"{node.node_id}: Materialize({node.method.value}) not wired yet "
+                "(ASR/rasterize/parse derivation)")
+        case Aggregate() | Union() | SemanticJoin():
+            raise NotImplementedError(f"{node.node_id}: {type(node).__name__} not supported yet")
+        case _:
+            raise NotImplementedError(f"unknown plan node {type(node).__name__}")
+
+
+# ---------------------------------------------------------------------------
+# Output rendering
+# ---------------------------------------------------------------------------
+
+def _primary_url(doc: Document) -> str | None:
+    env = doc.envelope
+    if env.source_url:
+        return env.source_url
+    cl = env.external_ids.get("courtlistener_cluster_id")
+    if cl:
+        return f"https://www.courtlistener.com/opinion/{cl}/x/"
+    return doc.source_pdf_url
+
+
+def _project(root: Project, rows: list[Row]) -> list[dict]:
+    out = []
+    for r in rows:
+        cols = {}
+        for c in root.columns:
+            cols[c.label] = _walk(r.doc, c.ref.path) if c.ref else None
+        out.append({
+            "id": r.doc.envelope.id,
+            "columns": cols,
+            "title": r.doc.title or "(untitled)",
+            "url": _primary_url(r.doc),
+            "evidence": [_link(r.doc, e) for e in r.evidence],
+        })
+    return out
+
+
+def _link(doc: Document, ev: dict) -> dict:
+    kind, label, ref = ev.get("kind"), ev.get("label"), ev.get("ref")
+    if kind == "image":
+        base = doc.source_pdf_url or _primary_url(doc)
+        url = f"{base}#page={label.split()[-1]}" if (base and label.startswith("page")) else (ref or base)
+    elif kind == "audio":
+        url = ref
+    else:
+        url = _primary_url(doc)
+    return {"label": label, "url": url, "quote": ev.get("quote", ""), "confidence": ev.get("confidence")}
+
+
+def _funnel_json(ctx: _Ctx) -> dict:
+    stages = [{"node_id": s.node_id, "rows_in": s.rows_in, "rows_out": s.rows_out,
+               "model_calls": s.model_calls, "seconds": round(s.seconds, 3),
+               "provenance": "measured", "remote_calls": s.remote_calls,
+               "cache_hits": s.cache_hits, "degraded": s.degraded} for s in ctx.stages]
+    return {"provenance": "measured",
+            "seconds": round(sum(s.seconds for s in ctx.stages), 3),
+            "model_calls": sum(s.model_calls for s in ctx.stages),
+            "remote_calls": sum(s.remote_calls for s in ctx.stages),
+            "rows_in": ctx.stages[0].rows_in if ctx.stages else 0,
+            "rows_out": ctx.stages[-1].rows_out if ctx.stages else 0,
+            "stages": stages}
+
+
+# ---------------------------------------------------------------------------
+# The seam api.driver calls
+# ---------------------------------------------------------------------------
+
+def _as_plannode(plan: Any) -> PlanNode:
+    """Accept a PlanNode, a node_json dict, a {'plan': ...} wrapper, or a
+    {'snapshots': [...]} bundle (the last snapshot is the final optimized plan)."""
+    if not isinstance(plan, dict):
+        return plan  # already a PlanNode
+    if "node" in plan:
+        return node_of(plan)
+    if "plan" in plan:
+        return _as_plannode(plan["plan"])
+    if plan.get("snapshots"):
+        return node_of(plan["snapshots"][-1]["plan"])
+    raise ValueError("execute: could not find a plan tree in the given dict")
+
+
+def execute(plan: Any, *, db_path: Path | None = None, rows: list[Row] | None = None) -> dict[str, Any]:
+    """Run an ExecutionPlan and return results plus per-stage telemetry, JSON-ready.
+
+    `db_path` overrides the corpus location; `rows` injects a pre-loaded candidate set
+    (used by the demo and tests to bypass Scan). The driver calls execute(plan) with
+    neither, and the Scan node reads the configured corpus."""
+    root = _as_plannode(plan)
+    store = Store(db_path=db_path) if db_path else Store()
+    ctx = _Ctx(store=store)
+
+    async def go() -> list[Row]:
+        if rows is not None:
+            # Skip the leaf Scan, feed injected rows into the pipeline above it.
+            from optimizer.plan import pipeline
+            chain = pipeline(root)
+            cur = rows
+            for node in chain[1:]:  # chain[0] is the Scan we're replacing
+                cur = await _step(node, cur, ctx)
+            return cur
+        return await _eval(root, ctx)
+
+    try:
+        survivors = asyncio.run(go())
+    finally:
+        store.close()
+
+    project_root = root if isinstance(root, Project) else None
+    results = _project(project_root, survivors) if project_root else [
+        {"id": r.doc.envelope.id, "title": r.doc.title, "url": _primary_url(r.doc),
+         "evidence": [_link(r.doc, e) for e in r.evidence]} for r in survivors]
+
+    return {"total": len(results), "results": results, "funnel": _funnel_json(ctx),
+            "provenance": "measured"}
+
+
+async def _step(node: PlanNode, rows: list[Row], ctx: _Ctx) -> list[Row]:
+    """Apply one single-input operator to an in-memory row set (for the injected-rows path)."""
+    match node:
+        case ExactFilter():    return _exact_filter(node, rows, ctx)
+        case SemanticFilter(): return await _run_semantic(node, rows, ctx)
+        case Expand():         return _expand(node, rows, ctx)
+        case Collapse():       return _collapse(node, rows, ctx)
+        case Limit():          return _limit(node, rows, ctx)
+        case Project():        return rows
+        case _:                raise NotImplementedError(f"{type(node).__name__} in injected-rows path")
+
+
+if __name__ == "__main__":
+    # Structural smoke test: decode the flagship fixture JSON and walk its shape without
+    # touching a model (the fixture targets the cluster/docket schema, not the dataform db).
+    from optimizer import fixtures
+    from optimizer.plan_editing import node_json, render_plan
+    root = fixtures.flagship()
+    assert node_of(node_json(root)) == root, "JSON round-trip must be identity"
+    print("flagship plan decodes and round-trips:\n")
+    print(render_plan(root))
