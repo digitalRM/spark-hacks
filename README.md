@@ -7,7 +7,7 @@ language over structured, text, image, document, and audio data.
 2. **Frontend** accepts a question and visualizes the compiled query.
 3. **Query language** compiles natural language into canonical BQL AST v2.
 4. **Optimizer** converts the AST into an execution plan.
-5. **Runtime** executes that plan. *(still a stub)*
+5. **Runtime** executes that plan. 
 
 ## The pipeline
 
@@ -32,10 +32,10 @@ question ─► router ─┬─ reject  ─────────────
 ```
 
 Every model call — routing, compiling, direct answers — goes to hosted Nemotron
-Super over the OpenAI protocol. One endpoint, one key, one dialect.
+Super over the OpenAI protocol. 
 
 `api/driver.py` owns the pipeline and the routing decision; every other module does
-one job and does not know what runs before or after it.
+one job independent of what runs before or after it.
 
 ## Setup
 
@@ -64,7 +64,6 @@ scripts/dev.sh            # API and frontend together, one environment
 `.env` in this directory is the only configuration file. Python reads it through
 [`config.py`](config.py); the scripts export it into the API and Next.js processes,
 which is how `AMICUS_API_URL` reaches the browser as `NEXT_PUBLIC_AMICUS_API_URL`.
-A real exported environment variable always beats a value in `.env`.
 
 Everything Amicus owns is `AMICUS_*`; vendor credentials keep their vendor's name.
 `.env.example` documents every variable; `python -m api.cli config` prints what a
