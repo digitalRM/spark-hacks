@@ -18,7 +18,7 @@ from optimizer.plan import (
     Aggregate, AggSpec, Collapse, Column, Derivation, ExactFilter, Expand, Limit,
     Materialize, PlanNode, PlanWarning, PredicateClass, Project, Provenance, Retrieve,
     Scan, SelectivitySource, SemanticFilter, SemanticJoin, Snapshot, Union,
-    children, grain, is_filter, pipeline, walk,
+    children, grain, is_filter, observed_fields, pipeline, walk,
 )
 
 # ---------------------------------------------------------------------------
@@ -132,8 +132,7 @@ def validate(
     """
     out: list[Violation] = []
     seen: set[str] = set()
-    projects_element = any(c.unnest for n in walk(root) if isinstance(n, Project)
-                           for c in n.columns)
+    observed = observed_fields(root)
 
     for n in walk(root):
         if n.node_id in seen:
@@ -179,12 +178,13 @@ def validate(
                     elif cls not in ok:
                         out.append(Violation(n.node_id, 'model_ineligible',
                                              f'{model!r} cannot serve {cls.value.upper()}'))
-                # Early exit stops at the first survivor in a group, so it is legal only
-                # where no one downstream can tell which survivor it was.
-                if n.early_exit and projects_element and len(grain(n)) > 1:
+                # Early exit stops at the first survivor, so it is legal only where no
+                # one downstream can tell which survivor it was. Per field: projecting
+                # one expanded field says nothing about another.
+                if n.early_exit and ref_str(n.field) in observed:
                     out.append(Violation(n.node_id, 'early_exit_observable',
-                                         'early_exit is illegal: the query projects the '
-                                         'expanded element'))
+                                         f'early_exit is illegal: the query projects '
+                                         f'unnest {ref_str(n.field)}'))
 
             case Limit(early_exit=True) if any(isinstance(m, Aggregate) for m in below):
                 out.append(Violation(n.node_id, 'early_exit_blocked',

@@ -285,6 +285,21 @@ def grain(n: PlanNode) -> Grain:
         case SemanticJoin(left=l, right=r):   return (*grain(l), *grain(r))
         case _:                               return grain(n.child)
 
+def observed_fields(root: PlanNode) -> frozenset[str]:
+    """Fields whose individual elements are visible in the output.
+
+    Projecting `unnest f` makes every matching element observable, so a filter over f
+    must find all of them rather than stopping at the first. This is the entire legality
+    condition for early exit, and it is decidable by looking at the Project — which is
+    only true because unnest is the language's single grain-widening construct.
+
+    Lives here rather than in the pass that uses it because validation needs the same
+    answer, and two implementations of one rule is how they come to disagree."""
+    return frozenset(
+        '.'.join((c.ref.source, *c.ref.path))
+        for n in walk(root) if isinstance(n, Project)
+        for c in n.columns if c.unnest and c.ref is not None)
+
 def is_filter(n: PlanNode) -> bool:
     """True for operators that can only shrink the record set."""
     return isinstance(n, (ExactFilter, Retrieve, SemanticFilter))

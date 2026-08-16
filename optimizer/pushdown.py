@@ -85,8 +85,11 @@ def _push(n: PlanNode, carry: tuple[ExactFilter, ...], depth: int,
                                           base_rows))
 
         case Expand():
-            return replace(n, child=_push(n.child, carry, depth - 1, warnings, probe,
-                                          base_rows))
+            # Clamped: a query that projects its expanded element gets no Collapse, so
+            # Expands are not always balanced and the count would run negative — leaving
+            # base-grain predicates below it looking unpushable when they are not.
+            return replace(n, child=_push(n.child, carry, max(0, depth - 1), warnings,
+                                          probe, base_rows))
 
         case _:
             return with_children(n, tuple(
