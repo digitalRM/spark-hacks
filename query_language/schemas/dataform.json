@@ -189,7 +189,7 @@
     {
       "name": "document.envelope.source_system",
       "type": "SCALAR",
-      "description": "courtlistener, ecfr, govinfo, congress, or oyez."
+      "description": "Which ingestion source the record came from: courtlistener (opinions), oyez (oral_argument), ecfr (cfr_section), congress (bills), govinfo. Do NOT add a source_system filter unless the user asks for a specific source - doc_type is the discriminator (an oral_argument is source 'oyez', never 'courtlistener')."
     },
     {
       "name": "document.envelope.external_ids",
@@ -210,17 +210,17 @@
     {
       "name": "document.citation",
       "type": "SCALAR",
-      "description": "Canonical citation string."
+      "description": "Canonical reporter citation of the opinion, e.g. '490 U.S. 386' (indexed). Use exact equality to find a specific reported case."
     },
     {
       "name": "document.jurisdiction",
       "type": "SCALAR",
-      "description": "NOT populated for court opinions (always null). Never filter on it. To scope by court or state, join document.proceeding_id -> proceeding.organization_id -> organization and use organization.name."
+      "description": "CourtListener court id of the court that issued the document - the FASTEST way to scope by court (indexed). Examples: scotus, ca1..ca11 (federal circuits), cadc, cafc, cand / nysd (district courts), texapp, illappct, delch (Delaware Chancery), haw. Use exact equality, e.g. doc.jurisdiction = 'ca9' for 'Ninth Circuit'. For a state ('Texas courts') prefer the organization join with fuzzy(org.name, 'Texas')."
     },
     {
       "name": "document.issuing_body_id",
       "type": "SCALAR",
-      "description": "Not populated for court opinions. Reach the court via document.proceeding_id -> proceeding.organization_id -> organization instead."
+      "description": "Organization UUID of the issuing court (indexed). Joins directly to organization.envelope.id, so a court name can be matched with fuzzy(org.name, ...) in one hop."
     },
     {
       "name": "document.date_issued",
@@ -235,7 +235,7 @@
     {
       "name": "document.summary",
       "type": "TEXT",
-      "description": "Short procedural syllabus of an opinion, e.g. 'Appeal from the district court for Douglas county'. Present for about 1 in 5 opinions.",
+      "description": "Syllabus / headnotes / procedural posture / disposition of an opinion (present for a growing share of opinions). Good for topical fuzzy() predicates when the question is about what a case held.",
       "embeddable": true
     },
     {

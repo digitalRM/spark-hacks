@@ -162,6 +162,7 @@ class _Ctx:
     scan_cap: dict[str, int] = field(default_factory=dict)  # scan node_id -> rows handed to the pipeline
     has_text: bool = False  # textdb.opinion_text is attached and readable
     plan_root: Any = None
+    columns: dict[str, set[str]] = field(default_factory=dict)  # table -> physical column names
 
     def record(self, s: _Stage) -> None:
         self.stages.append(s)
@@ -209,6 +210,17 @@ def _audio_text(ent: Any) -> tuple[str, Any] | None:
     return None
 
 
+def _audio_timestamp(asset: Any, predicate: str) -> float | None:
+    """Start time of the first transcript segment mentioning a predicate keyword, so the
+    player can jump to where the match is."""
+    kws = [k.lower() for k in _keywords(predicate, limit=6)]
+    for seg in (getattr(asset, "timestamp_index", None) or []):
+        t = (seg.get("text") or "").lower()
+        if any(k in t for k in kws):
+            return seg.get("start_seconds")
+    return None
+
+
 def _extract_content(row: Row, node: SemanticFilter) -> tuple[str, str | None, dict]:
     """Return (text_content, image_ref, evidence_stub) for the field this node reads."""
     val = row.value(node.field)
@@ -220,7 +232,8 @@ def _extract_content(row: Row, node: SemanticFilter) -> tuple[str, str | None, d
                 hit = _audio_text(ent) if ent is not None else None
                 if hit:
                     text, asset = hit
-                    return text, None, {"kind": "audio", "label": "oral argument", "ref": asset.audio_ref}
+                    return text, None, {"kind": "audio", "label": "oral argument", "ref": asset.audio_ref,
+                                        "timestamp": _audio_timestamp(asset, node.text)}
             v = _walk(ent, alt) if ent is not None else None
             if isinstance(v, str) and v.strip():
                 return v, None, {"kind": "text", "label": alt[-1], "ref": None}
@@ -348,7 +361,7 @@ async def _run_semantic(node: SemanticFilter, rows: list[Row], ctx: _Ctx) -> lis
 # A downstream semantic stage costs a model call per row, so bound the candidates a Scan
 # loads. Tight when a semantic filter follows (each row may cost ~20s on a reasoning model),
 # generous for a pure-metadata query.
-_SCAN_CAP_SEMANTIC = 15
+_SCAN_CAP_SEMANTIC = int(os.environ.get("AMICUS_SCAN_CAP", "24"))
 _SCAN_CAP_PLAIN = 200
 
 
@@ -367,6 +380,15 @@ about above below between within without describes describe mentions mention dis
 concerning regarding involving involves involve related relating includes include including
 contains contain containing states state stating says said whether if while also very more
 most less least other another each every either neither both few many much own same so too""".split())
+
+
+def _phrase(text: str) -> str:
+    """The predicate minus its framing words, e.g. 'discusses the Second Amendment' ->
+    'Second Amendment', kept as a phrase for retrieval."""
+    words = re.findall(r"[A-Za-z0-9'\-]+", text)
+    while words and words[0].lower() in _STOP: words.pop(0)
+    while words and words[-1].lower() in _STOP: words.pop()
+    return " ".join(words)
 
 
 def _keywords(text: str, limit: int = 5) -> list[str]:
@@ -418,6 +440,7 @@ def _prefilter_joined(root: PlanNode, scan: Scan, rows: list[Row],
     base_table, base_alias = base
     base_names = {base_table, base_alias}
     keeps = []
+    lenient = []
     for n in walk(root):
         if isinstance(n, ExactFilter):
             m = _EXACT_RE.search(n.predicate)
@@ -435,6 +458,7 @@ def _prefilter_joined(root: PlanNode, scan: Scan, rows: list[Row],
                 sv = str(v)
                 return {"=": sv == rhs, ">=": sv >= rhs, "<=": sv <= rhs, ">": sv > rhs, "<": sv < rhs}[op]
             keeps.append(k_exact)
+            lenient.append(k_exact)  # exact predicates hold in both passes
         elif isinstance(n, SemanticFilter):
             src = getattr(n.field, "source", None)
             if not src or src in base_names:
@@ -444,18 +468,23 @@ def _prefilter_joined(root: PlanNode, scan: Scan, rows: list[Row],
                 continue
             proper = [k for k in kws if k[0].isupper()]
             need = proper or kws
-            mode_all = bool(proper)
-            def k_sem(r: Row, ref=n.field, need=need, mode_all=mode_all) -> bool:
+            def k_strict(r: Row, ref=n.field, need=need) -> bool:
                 v = r.value(ref)
-                if not isinstance(v, str):
-                    return False
-                low = v.lower()
-                hits = [k.lower() in low for k in need]
-                return all(hits) if mode_all else any(hits)
-            keeps.append(k_sem)
+                return isinstance(v, str) and all(k.lower() in v.lower() for k in need)
+            def k_any(r: Row, ref=n.field, kws=kws) -> bool:
+                v = r.value(ref)
+                return isinstance(v, str) and any(k.lower() in v.lower() for k in kws)
+            keeps.append(k_strict)
+            lenient.append(k_any)
     if not keeps:
         return rows
-    return [r for r in rows if all(k(r) for k in keeps)]
+    strict = [r for r in rows if all(k(r) for k in keeps)]
+    if len(strict) >= _SCAN_CAP_SEMANTIC or not lenient:
+        return strict
+    # Not enough strict survivors (court records are named "Roberts Court (2022-)", not
+    # "Supreme Court", etc.): fall back to the lenient checks, then keep the model as judge.
+    loose = [r for r in rows if all(k(r) for k in lenient)]
+    return loose if loose else rows
 
 
 def _resolve_joins(scan: Scan, rows: list[Row], ctx: "_Ctx",
@@ -472,13 +501,30 @@ def _resolve_joins(scan: Scan, rows: list[Row], ctx: "_Ctx",
     tables = _alias_tables(scan)
     cache: dict[tuple[str, str], Any] = {}
 
+    def _batch_fetch(table: str, keys: list[str]) -> None:
+        """One IN(...) statement per 400 keys instead of a round trip per row."""
+        model = _TABLE_MODEL.get(table)
+        todo = [k for k in dict.fromkeys(keys) if (table, k) not in cache]
+        for i in range(0, len(todo), 400):
+            chunk = todo[i:i + 400]
+            q = f"SELECT id, data FROM {table} WHERE id IN ({','.join('?' * len(chunk))})"
+            for row in ctx.store.conn.execute(q, chunk).fetchall():
+                cache[(table, row["id"])] = model.model_validate_json(row["data"]) if model else None
+            for k in chunk:
+                cache.setdefault((table, k), None)
+
     def fetch(table: str, key: str) -> Any:
         ck = (table, key)
         if ck not in cache:
-            model = _TABLE_MODEL.get(table)
-            row = ctx.store.conn.execute(f"SELECT data FROM {table} WHERE id = ?", (key,)).fetchone()
-            cache[ck] = model.model_validate_json(row["data"]) if (row and model) else None
+            _batch_fetch(table, [key])
         return cache[ck]
+
+    # Pre-warm the first hop for every row at once (doc.proceeding_id -> proceeding, etc.).
+    for la, lp, ra, rp in conds:
+        for (ba, bp, ua, up) in ((la, lp, ra, rp), (ra, rp, la, lp)):
+            if ba in (base_alias, base_table) and ua in tables and up in (("envelope", "id"), ("id",)):
+                keys = [str(k) for k in (_walk(r.doc, bp) for r in rows) if k is not None]
+                _batch_fetch(tables[ua], keys)
 
     def is_pk(path: tuple[str, ...]) -> bool:
         return path in (("envelope", "id"), ("id",))
@@ -505,6 +551,7 @@ def _resolve_joins(scan: Scan, rows: list[Row], ctx: "_Ctx",
 # Retrieval budget: the whole tiered pre-filter must finish inside this many seconds; a
 # tier that overruns is abandoned and the next (broader, cheaper) one runs.
 _RETRIEVAL_BUDGET_S = 75.0
+_TIER_BUDGET_S = 20.0  # no single tier may eat the whole budget
 
 # Opinion full text lives in a side database written by the opinions ingestion pass
 # (`opinion_text(opinion_id, cluster_id, ..., plain_text)`, indexed by cluster_id, WAL so it
@@ -576,7 +623,13 @@ def _choose_base(root: PlanNode, scan: Scan) -> tuple[str, str]:
                 votes[t] = votes.get(t, 0) + 1
     if not votes or votes.get(base_table, 0) >= max(votes.values()):
         return base_table, base_alias
-    best = max(votes, key=lambda t: votes[t])
+    # Never scan from a small dimension table (courts, people): the record table that
+    # carries the text is the base; ties go to `document`, then `proceeding`.
+    prio = {"document": 3, "proceeding": 2}
+    ranked = sorted(votes, key=lambda t: (t in _SMALL_TABLES, -votes[t], -prio.get(t, 1)))
+    best = ranked[0]
+    if best in _SMALL_TABLES:
+        return base_table, base_alias
     alias = next((a for a, t in tables.items() if t == best and a != t), best)
     return best, alias
 
@@ -596,10 +649,13 @@ def _push_exact(m, base_names: set[str], scan: Scan, base_table: str,
         return
     last = path[-1]
     if alias in base_names:
+        cols = _PHYSICAL_COLS.get(base_table, set())
         if path[0] == "envelope" and last in _INDEXED_COLS or last in _INDEXED_COLS and len(path) == 1:
             where.append(f"{last} {op} ?")
         elif last in _DATE_FIELDS:
             where.append(f"date {op} ?")
+        elif len(path) == 1 and last in cols:
+            where.append(f'"{last}" {op} ?')  # generated + indexed column (jurisdiction, citation, ...)
         else:
             where.append(f"json_extract(data, '{_json_path(tuple(path))}') {op} ?")
         params.append(rhs)
@@ -613,7 +669,9 @@ def _push_exact(m, base_names: set[str], scan: Scan, base_table: str,
     for la, lp, ra, rp in conds:
         for (a1, p1, a2, p2) in ((la, lp, ra, rp), (ra, rp, la, lp)):
             if a1 in base_names and a2 == alias and p2 in (("envelope", "id"), ("id",)):
-                where.append(f"json_extract(data, '{_json_path(p1)}') IN "
+                fk = (f'"{p1[-1]}"' if len(p1) == 1 and p1[-1] in _PHYSICAL_COLS.get(base_table, set())
+                      else f"json_extract(data, '{_json_path(p1)}')")
+                where.append(f"{fk} IN "
                              f"(SELECT id FROM {t} WHERE json_extract(data, '{_json_path(tuple(path))}') {op} ?)")
                 params.append(rhs)
                 return
@@ -643,7 +701,17 @@ def _joined_filters(root: PlanNode, scan: Scan, base_names: set[str]) -> bool:
 # When the plan filters on joined tables, retrieve a larger pool so those filters can be
 # applied BEFORE the semantic stage's cap rather than after it (else a court filter would
 # be applied to 15 arbitrary candidates and usually kill them all).
-_POOL_FACTOR = 200  # joins are primary-key reads, so a big pool is cheap; the filter is what is selective
+_PHYSICAL_COLS: dict[str, set[str]] = {}  # set per execute() from pragma table_xinfo
+
+
+def _physical_columns(conn, table: str) -> set[str]:
+    try:
+        return {r[1] for r in conn.execute(f'pragma table_xinfo("{table}")').fetchall()}
+    except Exception:
+        return set()
+
+
+_JOIN_POOL = 900  # candidates retrieved before joined filters are applied; ~15 s of text scan
 
 
 def _plan_scan_query(root: PlanNode, scan: Scan, has_text: bool = False) -> list[tuple[str, tuple]]:
@@ -706,7 +774,7 @@ def _plan_scan_query(root: PlanNode, scan: Scan, has_text: bool = False) -> list
                         keywords.append(k)
 
     cap = _SCAN_CAP_SEMANTIC if has_semantic else _SCAN_CAP_PLAIN
-    pool = cap * _POOL_FACTOR if _joined_filters(root, scan, base_names) else cap
+    pool = max(cap, _JOIN_POOL) if _joined_filters(root, scan, base_names) else cap
     base_where = " AND ".join(where)
     text_sem = has_text and table == "document" and any(
         isinstance(n, SemanticFilter) and tuple(n.field.path) in _TEXT_FIELDS
@@ -717,8 +785,12 @@ def _plan_scan_query(root: PlanNode, scan: Scan, has_text: bool = False) -> list
         conds = ([base_where] if base_where else []) + extra
         if via_text:
             # keyword tier over the opinion text side table, joined back to documents
-            sql = (f"SELECT {table}.data FROM textdb.opinion_text t JOIN {table} "
-                   f"ON {table}.source_system = 'courtlistener' AND {table}.source_id = t.cluster_id")
+            if "cl_cluster_id" in _PHYSICAL_COLS.get(table, set()):
+                sql = (f"SELECT {table}.data FROM textdb.opinion_text t JOIN {table} "
+                       f"ON {table}.cl_cluster_id = t.cluster_id")
+            else:
+                sql = (f"SELECT {table}.data FROM textdb.opinion_text t JOIN {table} "
+                       f"ON {table}.source_system = 'courtlistener' AND {table}.source_id = t.cluster_id")
         else:
             sql = f"SELECT data FROM {table}"
         if conds:
@@ -729,13 +801,21 @@ def _plan_scan_query(root: PlanNode, scan: Scan, has_text: bool = False) -> list
     # Substring match on the JSON blob is a deliberate, index-free retrieval: the corpus
     # has no FTS, and a bounded LIKE scan is far cheaper than a model call per row.
     tiers: list[tuple[str, tuple]] = []
+    phrases = [ph for ph in (_phrase(n.text) for n in walk(root) if isinstance(n, SemanticFilter)
+                                                          and ((getattr(n.field, "source", None) or "") in base_names or len(scan.tables) == 1))
+               if ph and " " in ph]
     if has_semantic and keywords:
+        # Text-table tiers first (cheap, and where topical predicates are decided), then the
+        # same ladder over the JSON blob (titles, summaries, transcripts).
         if text_sem:
-            # opinion text first: it is where topical predicates are actually decided
+            for ph in phrases:
+                tiers.append(q(["t.plain_text LIKE ?"], [f"%{ph}%"], via_text=True))
             if len(keywords) > 1:
                 tiers.append(q(["t.plain_text LIKE ?"] * len(keywords), [f"%{k}%" for k in keywords], via_text=True))
             for k in keywords[:3]:
                 tiers.append(q(["t.plain_text LIKE ?"], [f"%{k}%"], via_text=True))
+        for ph in phrases:
+            tiers.append(q(["data LIKE ?"], [f"%{ph}%"]))
         if len(keywords) > 1:
             tiers.append(q(["data LIKE ?"] * len(keywords), [f"%{k}%" for k in keywords]))
         for k in keywords:
@@ -759,8 +839,10 @@ def _scan(node: Scan, ctx: _Ctx) -> list[Row]:
 
     # Abort a tier that overruns the retrieval budget; sqlite raises "interrupted".
     deadline = t0 + _RETRIEVAL_BUDGET_S
+    tier_deadline = [deadline]
     def _tick() -> int:
-        return 1 if time.perf_counter() > deadline else 0
+        now = time.perf_counter()
+        return 1 if now > deadline or now > tier_deadline[0] else 0
     conn.set_progress_handler(_tick, 20000)
 
     seen: set[str] = set()
@@ -772,6 +854,7 @@ def _scan(node: Scan, ctx: _Ctx) -> list[Row]:
             last = i == len(tiers) - 1
             if last:
                 conn.set_progress_handler(None, 0)  # the plain tier always completes
+            tier_deadline[0] = min(deadline, time.perf_counter() + _TIER_BUDGET_S)
             try:
                 fetched = conn.execute(sql, params).fetchall()
             except Exception as e:  # sqlite3.OperationalError: interrupted
@@ -956,7 +1039,39 @@ def _primary_url(doc: Document) -> str | None:
     return doc.source_pdf_url
 
 
-def _project(root: Project, rows: list[Row]) -> list[dict]:
+def _display_title(r: Row, ctx: "_Ctx | None" = None) -> str:
+    """Case name where we have one. Oral arguments are titled "Oral Argument - <date>";
+    the case name is on the linked proceeding, so use that."""
+    doc = r.doc
+    title = getattr(doc, "title", None) or "(untitled)"
+    if getattr(doc, "doc_type", None) and str(getattr(doc.doc_type, "value", doc.doc_type)) == "oral_argument":
+        proc = r.joined.get("proceeding") if r.joined else None
+        if proc is None and ctx is not None and getattr(doc, "proceeding_id", None):
+            row = ctx.store.conn.execute("SELECT data FROM proceeding WHERE id = ?", (doc.proceeding_id,)).fetchone()
+            proc = Proceeding.model_validate_json(row["data"]) if row else None
+        if proc is not None and proc.title:
+            when = f" ({doc.date_issued})" if getattr(doc, "date_issued", None) else ""
+            return f"{proc.title} — oral argument{when}"
+    return title
+
+
+def _media(doc: Any) -> list[dict]:
+    """The record's own files, so the UI can show them even without an evidence link."""
+    out: list[dict] = []
+    if getattr(doc, "source_pdf_url", None):
+        out.append({"kind": "pdf", "label": "opinion (PDF)", "url": doc.source_pdf_url})
+    media = getattr(doc, "media", None)
+    for a in (getattr(media, "audio", None) or []):
+        if getattr(a, "audio_ref", None):
+            out.append({"kind": "audio", "label": "oral argument (audio)", "url": a.audio_ref})
+    for im in (getattr(media, "images", None) or []):
+        if getattr(im, "image_ref", None):
+            out.append({"kind": "image", "label": f"page {im.page_number}" if getattr(im, "page_number", None) else "image",
+                        "url": im.image_ref})
+    return out
+
+
+def _project(root: Project, rows: list[Row], ctx: "_Ctx | None" = None) -> list[dict]:
     out = []
     for r in rows:
         cols = {}
@@ -965,9 +1080,10 @@ def _project(root: Project, rows: list[Row]) -> list[dict]:
         out.append({
             "id": r.doc.envelope.id,
             "columns": cols,
-            "title": r.doc.title or "(untitled)",
+            "title": _display_title(r, ctx),
             "url": _primary_url(r.doc),
             "evidence": [_link(r.doc, e) for e in r.evidence],
+            "media": _media(r.doc),
         })
     return out
 
@@ -981,7 +1097,10 @@ def _link(doc: Document, ev: dict) -> dict:
         url = ref
     else:
         url = _primary_url(doc)
-    return {"label": label, "url": url, "quote": ev.get("quote", ""), "confidence": ev.get("confidence")}
+    out = {"label": label, "url": url, "quote": ev.get("quote", ""), "confidence": ev.get("confidence")}
+    if ev.get("timestamp") is not None:
+        out["timestamp"] = ev["timestamp"]
+    return out
 
 
 def _funnel_json(ctx: _Ctx) -> dict:
@@ -1027,6 +1146,10 @@ def execute(plan: Any, *, db_path: Path | None = None, rows: list[Row] | None = 
     ctx = _Ctx(store=store)
     ctx.has_text = _attach_text_db(store)
     ctx.plan_root = root
+    for t in _TABLE_MODEL:
+        ctx.columns[t] = _physical_columns(store.conn, t)
+    _PHYSICAL_COLS.clear()
+    _PHYSICAL_COLS.update(ctx.columns)
 
     # Precompute each Scan's real SQL (pushdowns need the whole pipeline, which a bottom-up
     # walk of a single node can't see).
@@ -1050,13 +1173,12 @@ def execute(plan: Any, *, db_path: Path | None = None, rows: list[Row] | None = 
 
     try:
         survivors = asyncio.run(go())
+        project_root = root if isinstance(root, Project) else None
+        results = _project(project_root, survivors, ctx) if project_root else [
+            {"id": r.doc.envelope.id, "title": _display_title(r, ctx), "url": _primary_url(r.doc),
+             "evidence": [_link(r.doc, e) for e in r.evidence], "media": _media(r.doc)} for r in survivors]
     finally:
         store.close()
-
-    project_root = root if isinstance(root, Project) else None
-    results = _project(project_root, survivors) if project_root else [
-        {"id": r.doc.envelope.id, "title": r.doc.title, "url": _primary_url(r.doc),
-         "evidence": [_link(r.doc, e) for e in r.evidence]} for r in survivors]
 
     return {"total": len(results), "results": results, "funnel": _funnel_json(ctx),
             "provenance": "measured"}

@@ -15,6 +15,14 @@ export type ExecEvidence = {
   /** The model's one-sentence rationale for the match. */
   quote: string;
   confidence: number | null;
+  /** Audio evidence: seconds into the recording where the match is. */
+  timestamp?: number | null;
+};
+
+export type ExecMedia = {
+  kind: "pdf" | "audio" | "image";
+  label: string;
+  url: string;
 };
 
 export type ExecResult = {
@@ -26,6 +34,8 @@ export type ExecResult = {
    *  (e.g. "doc.summary"). Absent when the plan had no Project root. */
   columns?: Record<string, unknown>;
   evidence: ExecEvidence[];
+  /** The record's own files (opinion PDF, oral-argument MP3, page images). */
+  media?: ExecMedia[];
 };
 
 export type ExecFunnelStage = {
@@ -122,7 +132,8 @@ export function toSearchResult(r: ExecResult): SearchResult {
     seen.add(f.url);
     files.push(f);
   };
-  if (r.url) push({ url: r.url, title: sourceTitle(r.url), field: "source" });
+  // Evidence first (it carries the rationale + timestamp), then the record's own
+  // media (PDF / audio / images), then the source page.
   for (const e of evidence) {
     if (!e.url) continue;
     const page = pageFromUrl(e.url);
@@ -132,8 +143,13 @@ export function toSearchResult(r: ExecResult): SearchResult {
       field: e.label ?? undefined,
       snippet: e.quote || undefined,
       page: page ?? undefined,
+      timestamp: typeof e.timestamp === "number" ? e.timestamp : undefined,
     });
   }
+  for (const m of r.media ?? []) {
+    push({ url: m.url, kind: m.kind, title: capitalize(m.label), field: m.kind });
+  }
+  if (r.url) push({ url: r.url, title: sourceTitle(r.url), field: "source" });
 
   // Projected columns worth reading: strings that aren't just the id/title.
   // Summaries come back as HTML fragments (<p>…</p>) — show them as text.
