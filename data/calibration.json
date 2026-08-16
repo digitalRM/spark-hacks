@@ -1,0 +1,91 @@
+{
+  "_README": [
+    "Cost unit is wall-clock seconds on the target box, derived from throughput_items_per_sec.",
+    "Model keys are UNVERIFIED placeholders. Workstream 5 replaces them from config.py once the",
+    "real NIM/vLLM model strings are confirmed — a wrong string that looks right costs hours.",
+    "scripts/calibrate.py rewrites the numbers and flips measurement_status to MEASURED."
+  ],
+  "UNVERIFIED-embed-local": {
+    "predicate_classes": ["SIM"],
+    "throughput_items_per_sec": 180.0,
+    "latency_p50_ms": 6,
+    "latency_p95_ms": 14,
+    "vram_gb": 2.4,
+    "accuracy_on_labeled_set": 0.71,
+    "is_remote": false,
+    "measurement_status": "PLACEHOLDER"
+  },
+  "UNVERIFIED-rerank-local": {
+    "predicate_classes": ["SIM"],
+    "throughput_items_per_sec": 42.0,
+    "latency_p50_ms": 24,
+    "latency_p95_ms": 61,
+    "vram_gb": 1.8,
+    "accuracy_on_labeled_set": 0.83,
+    "is_remote": false,
+    "measurement_status": "PLACEHOLDER"
+  },
+  "UNVERIFIED-sem-lightning-local": {
+    "predicate_classes": ["SEM", "AUDIO"],
+    "throughput_items_per_sec": 5.8,
+    "latency_p50_ms": 172,
+    "latency_p95_ms": 410,
+    "vram_gb": 17.5,
+    "accuracy_on_labeled_set": 0.89,
+    "is_remote": false,
+    "measurement_status": "PLACEHOLDER"
+  },
+  "UNVERIFIED-vlm-nano-local": {
+    "predicate_classes": ["VISUAL"],
+    "throughput_items_per_sec": 1.35,
+    "latency_p50_ms": 740,
+    "latency_p95_ms": 1600,
+    "vram_gb": 9.2,
+    "accuracy_on_labeled_set": 0.86,
+    "is_remote": false,
+    "measurement_status": "PLACEHOLDER"
+  },
+  "UNVERIFIED-docparse-local": {
+    "_note": "Serves the DOC_PARSE derivation, not a predicate class. Listing it under VISUAL would let binding pick it for a pictorial predicate on price and accuracy alone — but a document parser reads text, and no accuracy number on a labeled set of text extraction says anything about finding a photograph. The parse-vs-VLM choice belongs to type refinement, where the predicate's character is still visible.",
+    "predicate_classes": [],
+    "throughput_items_per_sec": 2.3,
+    "latency_p50_ms": 435,
+    "latency_p95_ms": 890,
+    "vram_gb": 4.1,
+    "accuracy_on_labeled_set": 0.94,
+    "is_remote": false,
+    "measurement_status": "PLACEHOLDER"
+  },
+  "UNVERIFIED-asr-local": {
+    "_note": "Serves the ASR derivation, not a predicate class — same reason as the doc parser. A transcription model does not answer yes/no questions, and listing it under AUDIO let the naive binder pick it as the 'heaviest eligible' model for a predicate, costing 94s per segment to answer a question it cannot answer at all.",
+    "predicate_classes": [],
+    "throughput_items_per_sec": 0.0106,
+    "latency_p50_ms": 94000,
+    "latency_p95_ms": 148000,
+    "vram_gb": 3.3,
+    "accuracy_on_labeled_set": 0.91,
+    "is_remote": false,
+    "measurement_status": "PLACEHOLDER"
+  },
+  "UNVERIFIED-oracle-remote": {
+    "predicate_classes": ["SEM", "VISUAL", "AUDIO"],
+    "throughput_items_per_sec": 0.42,
+    "latency_p50_ms": 2380,
+    "latency_p95_ms": 6100,
+    "vram_gb": 0.0,
+    "accuracy_on_labeled_set": 0.97,
+    "is_remote": true,
+    "measurement_status": "PLACEHOLDER"
+  },
+  "_priors": {
+    "selectivity_by_class": {
+      "EXACT": 0.08,
+      "SIM": 0.05,
+      "SEM": 0.15,
+      "VISUAL": 0.10,
+      "AUDIO": 0.20
+    },
+    "sql_seconds_per_1k_rows": 0.00012,
+    "bespoke_seconds_per_item": 0.0008
+  }
+}

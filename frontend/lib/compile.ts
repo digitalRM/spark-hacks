@@ -1,29 +1,46 @@
 import type { BqlQuery } from "@/lib/bql";
 
+const API_URL = process.env.NEXT_PUBLIC_AMICUS_API_URL ?? "http://127.0.0.1:8000";
+
+/** One stage of the pipeline. `stub` means the module behind that seam is not written yet. */
+export type Stage = {
+  name: "relevance" | "compile" | "typecheck" | "optimize" | "execute";
+  status: "ok" | "failed" | "stub" | "skipped";
+  ms: number;
+  message?: string;
+  errors?: { path: string; code: string; message: string }[];
+  detail?: Record<string, unknown>;
+};
+
 export type CompiledSearchEnvelope = {
   mode: "compile";
+  ok: boolean;
   bql_version: string;
   schema: string;
   is_legal: true;
   question: string;
   query: BqlQuery;
   bql: string;
+  stages: Stage[];
+  plan: unknown | null;
+  results: unknown | null;
   warnings?: string[];
 };
 
+/** Lightning routed this to Super instead: a legal question BQL cannot express. */
 export type LegalAnswerEnvelope = {
   mode: "answer";
+  ok: boolean;
   is_legal: true;
   question: string;
   answer: string;
   model: string;
+  stages: Stage[];
 };
 
 export type CompileEnvelope = CompiledSearchEnvelope | LegalAnswerEnvelope;
 
-type CompileFailure = {
-  message?: string;
-};
+type CompileFailure = { message?: string };
 
 function isLegalAnswer(payload: unknown): payload is LegalAnswerEnvelope {
   return (
@@ -36,11 +53,7 @@ function isLegalAnswer(payload: unknown): payload is LegalAnswerEnvelope {
 
 function isCompiledSearch(payload: unknown): payload is CompiledSearchEnvelope {
   if (typeof payload !== "object" || payload === null) return false;
-  const value = payload as {
-    mode?: unknown;
-    query?: { kind?: unknown };
-    bql?: unknown;
-  };
+  const value = payload as { mode?: unknown; query?: { kind?: unknown }; bql?: unknown };
   return (
     value.mode === "compile" &&
     value.query?.kind === "Query" &&
@@ -48,17 +61,33 @@ function isCompiledSearch(payload: unknown): payload is CompiledSearchEnvelope {
   );
 }
 
-/** Natural language -> validated JSON AST -> deterministic BQL, via our server route. */
+/**
+ * Natural language -> routed -> either a validated JSON AST rendered as BQL, or a
+ * direct legal answer from Super.
+ *
+ * Talks to `api/server.py` directly; there is no Next route in between, so the API
+ * must be running (`.venv/bin/python -m api.server`) and its CORS origins must
+ * include this one. A rejected or failed request comes back as 422 with a `message`.
+ */
 export async function compileQuery(
   question: string,
   signal?: AbortSignal,
 ): Promise<CompileEnvelope> {
-  const response = await fetch("/api/compile", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ question }),
-    signal,
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${API_URL.replace(/\/$/, "")}/compile`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ question }),
+      signal,
+    });
+  } catch (reason) {
+    if (reason instanceof DOMException && reason.name === "AbortError") throw reason;
+    throw new Error(
+      `The Amicus API is unreachable at ${API_URL}. Start it with 'python -m api.server'.`,
+    );
+  }
+
   const payload = (await response.json()) as unknown;
   if (!response.ok) {
     const failure = payload as CompileFailure;

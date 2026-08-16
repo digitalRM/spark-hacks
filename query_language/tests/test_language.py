@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 
 from query_language import (checks, client, compiler, legal_answer, relevance,
-                            schema, serde, serialize)
+                            schema, serde)
 from query_language.ast import (
     Aggregator,
     AggregatorOp,
@@ -105,10 +105,6 @@ class TestCanonicalAst(unittest.TestCase):
         )
         self.assertEqual(serde.decode(serde.encode(query)), query)
 
-    def test_legacy_serialize_module_delegates_to_v2_contract(self):
-        query = q(where=Fuzzy(f("cluster", "scan_pages"), "photo"))
-        self.assertEqual(serialize.query_to_dict(query), serde.encode(query))
-        self.assertEqual(json.loads(serialize.to_json(query)), serde.encode(query))
 
     def test_wire_shape_matches_remote_ast(self):
         wire = serde.encode(q(where=Fuzzy(f("cluster", "scan_pages"), "photo")))

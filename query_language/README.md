@@ -8,10 +8,10 @@ any hosted call. Compiled JSON is the wire contract defined by `ast.py` and
 never accepted directly from the model.
 
 ```bash
-BQL_MOCK=1 python3 -m query_language.cli compile \
+BQL_MOCK=1 python3 -m api.cli compile \
   --json "CourtListener opinions discussing qualified immunity"
 
-python3 -m query_language.cli --schema dataform schema
+python3 -m api.cli --schema dataform schema
 python3 -m unittest discover -s query_language/tests -t .
 ```
 
@@ -21,7 +21,7 @@ For the live cloud compiler:
 python3 -m venv .venv
 .venv/bin/python -m pip install -r query_language/requirements.txt
 export NVIDIA_API_KEY=nvapi-your-rotated-key
-.venv/bin/python -m query_language.cli --schema dataform compile \
+.venv/bin/python -m api.cli --schema dataform compile \
   "CourtListener opinions discussing qualified immunity" --json
 ```
 
@@ -33,7 +33,7 @@ decode/validate/repair loop.
 Global CLI options such as `--schema` go before the subcommand:
 
 ```bash
-python3 -m query_language.cli --schema dataform compile "Count documents by type" --json
+python3 -m api.cli --schema dataform compile "Count documents by type" --json
 ```
 
 ## Step-1 handoff
@@ -53,8 +53,8 @@ the new `FieldRef.path`:
 Collections use `Unnest` only when the query/result is at element grain. A
 plain collection `FieldRef` is quantified at its parent-row grain.
 
-Set `AMICUS_SCHEMA=dataform` in `frontend/.env.local` to make the frontend route
-compile against this canonical ingestion model. `courtlistener` remains
+Set `AMICUS_SCHEMA=dataform` in the API process's environment to compile against
+this canonical ingestion model. `courtlistener` remains
 available for the original flat physical schema.
 
 ## Compiler boundary
@@ -93,10 +93,11 @@ The rejection copy can be changed with `BQL_RELEVANCE_MESSAGE`. Set
 
 ## Frontend/API
 
-The Next.js route `POST /api/compile` invokes:
+The frontend calls the Python API directly; there is no Next.js route. The API
+runs the whole pipeline (relevance, compile, typecheck, optimize, execute):
 
 ```bash
-python3 -m query_language.cli --schema "$AMICUS_SCHEMA" compile "$QUESTION" --json
+.venv/bin/python -m api.server
 ```
 
 Use `BQL_MOCK=1` for deterministic offline UI development. The live compiler
@@ -104,7 +105,9 @@ configuration is read at request time:
 
 | variable | default |
 |---|---|
-| `AMICUS_SCHEMA` | `courtlistener` in the CLI; `dataform` in the frontend route |
+| `AMICUS_SCHEMA` | `courtlistener` from `schema.load()`; set `dataform` for the app |
+| `AMICUS_HOST` / `AMICUS_PORT` | `127.0.0.1` / `8000` |
+| `AMICUS_CORS_ORIGINS` | `http://localhost:3000` |
 | `SPARK_HOST` | `172.16.94.53` |
 | `RELEVANCE_MODEL` | `nvidia/nemotron-3.5-lightning` on local `:8001` |
 | `BQL_RELEVANCE_ENABLED` | `1` |
