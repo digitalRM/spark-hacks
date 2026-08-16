@@ -26,7 +26,7 @@ from dataclasses import dataclass, field as dc_field
 from pathlib import Path
 from typing import Any, Callable
 
-from . import checks, client, relevance, schema, serde
+from . import checks, client, legal_answer, relevance, schema, serde
 from .ast import (Aggregator, AggregatorOp, And, Between, Comparison,
                   ComparisonOperator as Op, FieldRef, Fuzzy, InList, Join, Like,
                   Not, Or, Query, TableRef, Unnest)
@@ -43,6 +43,7 @@ EXAMPLES_DIR = Path(__file__).resolve().parent / "examples"
 
 ChatFn = Callable[..., client.ChatResponse]
 RelevanceFn = Callable[[str], relevance.RelevanceResult]
+AnswerFn = Callable[[str], client.ChatResponse]
 
 
 @dataclass
@@ -60,6 +61,7 @@ class CompileResult:
     latency_ms: float = 0.0
     is_legal: bool = True
     relevance_model: str = ""
+    answer: str | None = None
     # Parts of the question the language cannot express. The query is still valid;
     # it just answers something narrower than what was asked.
     warnings: list[str] = dc_field(default_factory=list)
@@ -71,10 +73,19 @@ class CompileResult:
         return pp_query(self.ast).strip() if self.ast else ""
 
     def envelope(self) -> dict[str, Any]:
-        """The query plus the metadata a consumer needs to interpret it."""
-        if not self.ok or self.query is None:
+        """A compiled-search or direct-answer success response."""
+        if not self.ok:
             raise ValueError("cannot build an envelope from a failed compile")
+        if self.answer is not None:
+            return {
+                "mode": "answer", "is_legal": True,
+                "question": self.question, "answer": self.answer,
+                "model": self.model,
+            }
+        if self.query is None:
+            raise ValueError("successful compile has neither a query nor an answer")
         envelope = {"bql_version": BQL_VERSION, "schema": self.schema_name,
+                    "mode": "compile",
                     "is_legal": self.is_legal,
                     "question": self.question, "query": self.query,
                     "bql": self.printed}
@@ -85,6 +96,7 @@ class CompileResult:
     def error_report(self) -> dict[str, Any]:
         """A structured failure, safe to return over HTTP or show in a UI."""
         return {"ok": False,
+                "mode": "reject" if not self.is_legal else "compile",
                 "stage": "relevance" if not self.is_legal else "compile",
                 "is_legal": self.is_legal, "question": self.question,
                 "message": self.message(), "errors": list(self.errors),
@@ -111,8 +123,11 @@ class CompileResult:
 
     def to_dict(self) -> dict[str, Any]:
         return {"ok": self.ok, "is_legal": self.is_legal,
+                "mode": ("answer" if self.answer is not None else
+                         "reject" if not self.is_legal else "compile"),
                 "question": self.question, "query": self.query,
                 "bql": self.printed, "printed": self.printed,
+                "answer": self.answer,
                 "errors": list(self.errors), "attempts": self.attempts,
                 "model": self.model, "schema": self.schema_name, "cached": self.cached,
                 "relevance_model": self.relevance_model,
@@ -479,6 +494,7 @@ def compile_question(question: str, *, registry: schema.Registry | None = None,
                      use_cache: bool = True, model: str | None = None,
                      chat_fn: ChatFn | None = None,
                      relevance_fn: RelevanceFn | None = None,
+                     answer_fn: AnswerFn | None = None,
                      max_attempts: int = MAX_ATTEMPTS) -> CompileResult:
     """Compile a question into a BQL query. Never raises for a bad model answer.
 
@@ -487,8 +503,8 @@ def compile_question(question: str, *, registry: schema.Registry | None = None,
     records every round trip. A transport failure (no key, endpoint down) does
     raise, because that is an operator problem rather than a query problem.
 
-    Cost: one small local relevance call, plus 0 calls on a query-cache hit or
-    1..max_attempts hosted compiler calls on a miss.
+    Cost: one small local routing call, then either one direct Super answer, zero
+    calls on a query-cache hit, or 1..max_attempts hosted compiler calls.
     """
     t0 = time.perf_counter()
     reg = registry or schema.load()
@@ -507,6 +523,16 @@ def compile_question(question: str, *, registry: schema.Registry | None = None,
         return CompileResult(
             ok=False, question=question, model=decision.model,
             schema_name=reg.name, is_legal=False,
+            relevance_model=decision.model,
+            latency_ms=(time.perf_counter() - t0) * 1000,
+        )
+
+    if decision.route == "answer":
+        response = (answer_fn(question) if answer_fn is not None
+                    else legal_answer.answer_question(question))
+        return CompileResult(
+            ok=True, question=question, answer=response.text.strip(),
+            model=response.model, schema_name=reg.name, is_legal=True,
             relevance_model=decision.model,
             latency_ms=(time.perf_counter() - t0) * 1000,
         )

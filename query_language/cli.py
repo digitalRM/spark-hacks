@@ -74,6 +74,10 @@ def _compile(a, reg) -> int:
         return 0 if r.ok else 1
 
     if r.ok:
+        if r.answer is not None:
+            print(f"OK  ({r.model}, direct legal answer, {r.latency_ms:.0f} ms)\n")
+            print(r.answer)
+            return 0
         source = "cache" if r.cached else f"{r.model}, {len(r.attempts)} attempt(s)"
         print(f"OK  ({source}, {r.latency_ms:.0f} ms)\n")
         print(r.printed + "\n")

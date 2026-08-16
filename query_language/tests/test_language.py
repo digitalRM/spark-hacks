@@ -5,7 +5,8 @@ import json
 import unittest
 from pathlib import Path
 
-from query_language import checks, client, compiler, relevance, schema, serde, serialize
+from query_language import (checks, client, compiler, legal_answer, relevance,
+                            schema, serde, serialize)
 from query_language.ast import (
     Aggregator,
     AggregatorOp,
@@ -306,6 +307,7 @@ class TestCompilerLoop(unittest.TestCase):
         self.assertTrue(result.ok)
         self.assertEqual(result.ast, serde.decode(result.query))
         self.assertEqual(result.envelope()["bql_version"], "2.0")
+        self.assertEqual(result.envelope()["mode"], "compile")
         self.assertIs(result.envelope()["is_legal"], True)
         self.assertEqual(result.envelope()["bql"], result.printed)
         self.assertIn("select", result.envelope()["bql"])
@@ -348,34 +350,71 @@ class TestCompilerLoop(unittest.TestCase):
         self.assertEqual(compiler.cannot_express("How many cases by court?"), [])
         self.assertTrue(compiler.cannot_express("Five most recent cases"))
 
+    def test_direct_legal_answer_bypasses_query_compiler(self):
+        compiler_called = False
+
+        def forbidden_chat(messages, **kwargs):
+            nonlocal compiler_called
+            compiler_called = True
+            raise AssertionError("NL-to-JSON compiler must not run")
+
+        result = compiler.compile_question(
+            "What is qualified immunity?",
+            registry=REG,
+            use_cache=False,
+            chat_fn=forbidden_chat,
+            relevance_fn=lambda question: relevance.RelevanceResult(
+                True, "lightning-test", 5, route="answer",
+            ),
+            answer_fn=lambda question: client.ChatResponse(
+                text="A direct legal explanation.", model="super-test",
+            ),
+        )
+        self.assertTrue(result.ok)
+        self.assertFalse(compiler_called)
+        self.assertIsNone(result.query)
+        self.assertEqual(result.answer, "A direct legal explanation.")
+        self.assertEqual(result.envelope(), {
+            "mode": "answer", "is_legal": True,
+            "question": "What is qualified immunity?",
+            "answer": "A direct legal explanation.", "model": "super-test",
+        })
+
 
 class TestRelevanceGate(unittest.TestCase):
-    def test_lightning_returns_strict_boolean_contract(self):
+    def test_lightning_returns_strict_routing_contract(self):
         seen = {}
 
         def fake_chat(messages, **kwargs):
             seen["messages"] = messages
             seen["kwargs"] = kwargs
             return client.ChatResponse(
-                text='{"is_legal": true}', model="lightning-test", latency_ms=12,
+                text='{"is_legal": true, "route": "compile"}',
+                model="lightning-test", latency_ms=12,
             )
 
         result = relevance.classify("cases about qualified immunity", chat_fn=fake_chat)
         self.assertTrue(result.is_legal)
+        self.assertEqual(result.route, "compile")
         self.assertEqual(result.model, "lightning-test")
-        self.assertIn("legal_relevance_gate", seen["messages"][0]["content"])
+        self.assertIn("legal_request_router", seen["messages"][0]["content"])
         self.assertEqual(seen["kwargs"]["model"], client.RELEVANCE_MODEL)
         self.assertEqual(seen["kwargs"]["temperature"], 0.0)
         self.assertEqual(seen["kwargs"]["max_tokens"], relevance.MAX_TOKENS)
         self.assertIs(seen["kwargs"]["enable_thinking"], False)
-        self.assertIn('"hi" -> {"is_legal": false}', seen["messages"][0]["content"])
-        self.assertIn("affirmative evidence", seen["messages"][0]["content"])
+        self.assertIn('"route": "answer"', seen["messages"][0]["content"])
+        self.assertIn('"hi" -> {"is_legal": false', seen["messages"][0]["content"])
+        self.assertIn("reliably sort/rank records", seen["messages"][0]["content"])
 
     def test_invalid_classifier_shape_fails_closed(self):
         with self.assertRaises(client.ModelError):
             relevance._decode('{"related": true}')
         with self.assertRaises(client.ModelError):
             relevance._decode('{"is_legal": "yes"}')
+        with self.assertRaises(client.ModelError):
+            relevance._decode('{"is_legal": true, "route": "reject"}')
+        with self.assertRaises(client.ModelError):
+            relevance._decode('{"is_legal": true, "route": "other"}')
 
     def test_nonlegal_input_never_reaches_compiler(self):
         compiler_called = False
@@ -406,6 +445,25 @@ class TestRelevanceGate(unittest.TestCase):
         self.assertTrue(relevance._mock_is_legal("Find cases about qualified immunity"))
         self.assertFalse(relevance._mock_is_legal("hi"))
         self.assertFalse(relevance._mock_is_legal("Give me a chocolate cake recipe"))
+        self.assertEqual(relevance._mock_route("Find cases about immunity"), "compile")
+        self.assertEqual(relevance._mock_route("What is qualified immunity?"), "answer")
+        self.assertEqual(relevance._mock_route("hi"), "reject")
+
+
+class TestLegalAnswer(unittest.TestCase):
+    def test_super_answer_uses_separate_plain_text_prompt(self):
+        seen = {}
+
+        def fake_chat(messages, **kwargs):
+            seen["messages"] = messages
+            seen["kwargs"] = kwargs
+            return client.ChatResponse(text="General legal information.", model="super-test")
+
+        response = legal_answer.answer_question("What is negligence?", chat_fn=fake_chat)
+        self.assertEqual(response.text, "General legal information.")
+        self.assertEqual(seen["kwargs"]["model"], legal_answer.ANSWER_MODEL)
+        self.assertTrue(seen["kwargs"]["enable_thinking"])
+        self.assertIn("rather than legal advice", seen["messages"][0]["content"])
 
 
 class TestClientAndMock(unittest.TestCase):

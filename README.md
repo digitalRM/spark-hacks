@@ -14,18 +14,19 @@ language over structured, text, image, document, and audio data.
 The `dataform` schema maps nested fields from
 `data_ingestion/dataform/models.py` directly to `FieldRef.path` in
 `query_language/ast.py`. The frontend's `POST /api/compile` route invokes the
-Python compiler server-side. Nemotron Super produces JSON, the compiler validates
-it, and a deterministic pretty-printer converts the validated JSON to BQL. The UI
-shows both forms alongside tree and plan views.
+Python pipeline server-side. Lightning routes court-record searches through
+Super's validated JSON compiler and routes explanatory legal questions to a
+direct Super answer. A deterministic pretty-printer converts compiled JSON to
+BQL, and the UI shows the appropriate result.
 
 ```text
 data_ingestion.dataform
         │  schemas/dataform.json
         ▼
-Lightning :8001 relevance gate ──► hosted Nemotron Super
-                                      │
-                                      ▼
-                         validated AST v2 JSON ──► BQL printer ──► frontend
+Lightning :8001 request router
+        ├─ unrelated ────────────────► rejection
+        ├─ record search ─► Super ───► AST v2 JSON ─► BQL ─► frontend
+        └─ legal question ─► Super ──► direct answer ───────► frontend
 ```
 
 ## Local setup

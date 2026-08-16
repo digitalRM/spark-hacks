@@ -7,6 +7,11 @@ contract from `query_language/serde.py` plus BQL deterministically printed from
 that JSON. The redesigned UI preserves its Summary view and adds Tree, JSON, and
 BQL tabs over the same canonical response.
 
+Lightning routes each request before compilation. Record searches keep the
+compiled-query interface; legal explanations that do not fit the query language
+return a small `Legal Answer` panel populated directly by hosted Nemotron Super;
+unrelated requests use the existing error panel.
+
 ```bash
 cd ..
 python3 -m venv .venv

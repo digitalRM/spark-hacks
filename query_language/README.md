@@ -1,10 +1,11 @@
 # Query language — natural language → JSON → BQL
 
-Step 3 first asks local Nemotron Lightning on Spark `:8001` whether the input is
-legal-research related. Only relevant inputs are sent to hosted Nemotron Super,
-validated/repaired as JSON, and rendered as readable BQL. The JSON is the wire
-contract defined by `ast.py` and `serde.py`; BQL text is generated from it by the
-deterministic pretty-printer, never accepted directly from the model.
+Step 3 first asks local Nemotron Lightning on Spark `:8001` to route the input.
+Court-record searches go to the JSON/BQL compiler, explanatory legal questions
+go to hosted Nemotron Super for a direct answer, and unrelated inputs stop before
+any hosted call. Compiled JSON is the wire contract defined by `ast.py` and
+`serde.py`; BQL text is generated from it by the deterministic pretty-printer,
+never accepted directly from the model.
 
 ```bash
 BQL_MOCK=1 python3 -m query_language.cli compile \
@@ -74,12 +75,18 @@ Every compile uses a validate–repair loop. Invalid JSON, AST-shape errors, bad
 aliases, unknown nested paths, illegal joins, modality mismatches, and grouping
 errors are returned to the model with exact JSON paths for up to three attempts.
 
-## Legal relevance gate
+## Legal request router
 
-Before cache lookup or NL→JSON work, Lightning returns exactly
-`{"is_legal": true|false}`. A false decision stops the pipeline and returns a
-structured `stage: "relevance"` response; the frontend displays its existing
-plain error state. No frontend layout or component changes are required.
+Before cache lookup or NL→JSON work, Lightning returns `is_legal` and one of
+three routes:
+
+- `reject`: unrelated input; returns structured `stage: "relevance"` and makes
+  no hosted call.
+- `compile`: record retrieval/filtering/counting; runs the existing validated
+  natural-language → JSON → BQL path.
+- `answer`: legal explanation or guidance that BQL cannot answer; calls hosted
+  Super once and returns `{mode: "answer", answer: "..."}` without invoking the
+  optimizer or query runtime.
 
 The rejection copy can be changed with `BQL_RELEVANCE_MESSAGE`. Set
 `BQL_RELEVANCE_ENABLED=0` only when the gate must be bypassed for diagnostics.
@@ -101,11 +108,13 @@ configuration is read at request time:
 | `SPARK_HOST` | `172.16.94.53` |
 | `RELEVANCE_MODEL` | `nvidia/nemotron-3.5-lightning` on local `:8001` |
 | `BQL_RELEVANCE_ENABLED` | `1` |
-| `BQL_RELEVANCE_MAX_TOKENS` | `64` |
-| `BQL_RELEVANCE_TIMEOUT_S` / `BQL_RELEVANCE_MAX_RETRIES` | `30` / `2` |
+| `BQL_RELEVANCE_MAX_TOKENS` | `48` |
+| `BQL_RELEVANCE_TIMEOUT_S` / `BQL_RELEVANCE_MAX_RETRIES` | `3` / `1` |
 | `BQL_REMOTE_BASE_URL` | `https://integrate.api.nvidia.com/v1` |
 | `COMPILER_MODEL` | `nvidia/nemotron-3-super-120b-a12b` |
 | `FALLBACK_COMPILER_MODEL` | same as `COMPILER_MODEL` (no silent local fallback) |
+| `LEGAL_ANSWER_MODEL` | `nvidia/nemotron-3-super-120b-a12b` |
+| `LEGAL_ANSWER_MAX_TOKENS` | `4096` |
 | `NVIDIA_API_KEY` | required for live hosted compilation |
 | `BQL_ENABLE_THINKING` | `1` |
 | `BQL_REASONING_BUDGET` | `16384` |

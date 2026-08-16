@@ -42,6 +42,7 @@ export default function Home() {
   const [compiling, setCompiling] = useState(false);
   const [ast, setAst] = useState<BqlQuery | null>(null);
   const [bql, setBql] = useState("");
+  const [answer, setAnswer] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [view, setView] = useState<View>("query");
   // result phase: once we have a plan it "runs" for a bit, then shows a result
@@ -94,12 +95,17 @@ export default function Home() {
     setCompiling(true);
     setAst(null);
     setBql("");
+    setAnswer(null);
     setError(null);
     setResultPhase("idle");
     setResults(null);
     setRunError(null);
     try {
       const result = await compileQuery(text);
+      if (result.mode === "answer") {
+        setAnswer(result.answer);
+        return;
+      }
       setAst(result.query);
       setBql(result.bql);
       setResultPhase("running");
@@ -215,9 +221,9 @@ export default function Home() {
           <div data-bg-clear className="max-w-4xl mx-auto w-full">
             <NotchedPanel
               className="animate-rise-in"
-              title="Compiled Search"
+              title={answer ? "Legal Answer" : "Compiled Search"}
               actions={
-                <div
+                answer ? undefined : <div
                   role="tablist"
                   className="flex max-w-full overflow-x-auto rounded-xl bg-neutral-100 p-1 text-sm"
                 >
@@ -244,6 +250,10 @@ export default function Home() {
               {error ? (
                 <p className="rounded-xl border border-neutral-200 py-8 text-center text-sm text-rose-600 rounded-tr-lg">
                   {error}
+                </p>
+              ) : answer ? (
+                <p className="animate-fade-in whitespace-pre-wrap rounded-xl border border-neutral-200 p-5 text-sm leading-7 text-neutral-800">
+                  {answer}
                 </p>
               ) : !ast ? (
                 <p className="rounded-xl border border-neutral-200 py-8 text-center text-sm text-neutral-400 -m-1.5 -mt-3">
