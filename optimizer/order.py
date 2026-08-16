@@ -37,11 +37,6 @@ per query, and exposed in the plan editor — it is the main precision/cost dial
 UPGRADE_ACCURACY_DELTA = 0.05
 """How much accuracy the next model up must add before it is worth its extra cost."""
 
-DEFAULT_ROLES: dict[str, str] = {
-    # TODO: verify — these come from config.py once the real model strings are confirmed.
-    'ASR_MODEL': 'UNVERIFIED-asr-local',
-    'DOC_PARSE_MODEL': 'UNVERIFIED-docparse-local',
-}
 
 # ---------------------------------------------------------------------------
 
@@ -49,12 +44,11 @@ def cost_and_order(root: PlanNode, est: StaticEstimator,
                    accuracy_floor: float = ACCURACY_FLOOR,
                    upgrade_delta: float = UPGRADE_ACCURACY_DELTA,
                    stats: CorpusStats = ACTIVE,
-                   roles: dict[str, str] = DEFAULT_ROLES,
                    ) -> tuple[PlanNode, list[PlanWarning]]:
     """Estimate, bind, and reorder. Returns the rewritten plan and any warnings."""
     warnings: list[PlanWarning] = []
     p = _estimate_selectivity(root, est)
-    p = _bind(p, est, accuracy_floor, warnings, stats, roles)
+    p = _bind(p, est, accuracy_floor, warnings, stats)
     p = _order(p, est, stats)
     p = _upgrade(p, est, upgrade_delta, stats)
     return p, warnings
@@ -82,8 +76,7 @@ def _estimate_selectivity(root: PlanNode, est: StaticEstimator) -> PlanNode:
 # ---------------------------------------------------------------------------
 
 def _bind(root: PlanNode, est: StaticEstimator, floor: float,
-          warnings: list[PlanWarning], stats: CorpusStats,
-          roles: dict[str, str]) -> PlanNode:
+          warnings: list[PlanWarning], stats: CorpusStats) -> PlanNode:
     """Bind the cheapest eligible model that clears the accuracy floor.
 
     eligible_models() returns cheapest first, so this is a scan for the first acceptable
@@ -115,17 +108,18 @@ def _bind(root: PlanNode, est: StaticEstimator, floor: float,
                         n.node_id))
                 return replace(n, bound_model=m.name, binding_reason=reason)
 
-            case Materialize(method=method, produces=produces):
-                # A derivation's model comes from its role, not from a predicate class.
-                # Conflating the two is how a transcription model ends up answering a
-                # yes/no question.
-                d = derivation(stats, produces)
-                role = d.model_role if d else 'NONE'
-                if role == 'NONE':
+            case Materialize(method=method):
+                # A derivation's model comes from the derivation section of calibration,
+                # which predicate binding cannot see and which cannot see predicate
+                # classes. Conflating the two is how a transcription model ends up
+                # bound to a yes/no question.
+                m = est.derivation_model(method)
+                if m is None:
                     return replace(n, bound_model=f'bespoke:{method.value}',
                                    binding_reason='deterministic code, no model')
-                return replace(n, bound_model=roles.get(role, role),
-                               binding_reason=f'{role} serves the {method.value} derivation')
+                return replace(n, bound_model=m.name,
+                               binding_reason=f'serves the {method.value} derivation '
+                                              f'({m.seconds_per_item:.2f}s/unit)')
 
             case _: return n
     return map_nodes(root, f)

@@ -26,7 +26,7 @@ from typing import Protocol
 
 from optimizer.funnel import Funnel, StageMetrics
 from optimizer.plan import (
-    Aggregate, Collapse, ExactFilter, Expand, Limit, Materialize, PlanNode,
+    Aggregate, Collapse, Derivation, ExactFilter, Expand, Limit, Materialize, PlanNode,
     PredicateClass, Project, Provenance, Retrieve, Scan, SemanticFilter, SemanticJoin,
     Union, grain,
 )
@@ -38,9 +38,14 @@ CALIBRATION_PATH = Path(__file__).resolve().parent.parent / 'data' / 'calibratio
 
 @dataclass(frozen=True)
 class ModelSpec:
-    """One row of calibration.json."""
+    """One row of calibration.json.
+
+    Which capability field is populated depends on which *section* the row came from,
+    and the parser only reads the key belonging to that section. That is the whole point
+    of the split: a derivation model cannot acquire predicate classes, because nothing
+    reads them for it. Three times now a transformer has been listed under a predicate
+    class and bound to a predicate it cannot answer."""
     name: str
-    predicate_classes: tuple[PredicateClass, ...]
     throughput_items_per_sec: float
     latency_p50_ms: float
     latency_p95_ms: float
@@ -48,6 +53,9 @@ class ModelSpec:
     accuracy: float
     is_remote: bool
     provenance: Provenance
+    predicate_classes: tuple[PredicateClass, ...] = ()
+    methods: tuple[Derivation, ...] = ()
+    retrieval_role: str | None = None
 
     @property
     def seconds_per_item(self) -> float:
@@ -71,19 +79,30 @@ class StaticEstimator(CardinalityModel, CostModel):
                  calibration_path: Path = CALIBRATION_PATH) -> None:
         self.stats = stats
         raw = json.loads(calibration_path.read_text())
-        priors = raw.pop('_priors', {})
-        raw.pop('_README', None)
-        self.models: dict[str, ModelSpec] = {
-            name: ModelSpec(
+        priors = raw.get('_priors', {})
+
+        def spec(name: str, d: dict, **caps) -> ModelSpec:
+            return ModelSpec(
                 name=name,
-                predicate_classes=tuple(PredicateClass(c.lower())
-                                        for c in d['predicate_classes']),
                 throughput_items_per_sec=d['throughput_items_per_sec'],
                 latency_p50_ms=d['latency_p50_ms'], latency_p95_ms=d['latency_p95_ms'],
                 vram_gb=d['vram_gb'], accuracy=d['accuracy_on_labeled_set'],
                 is_remote=d['is_remote'],
-                provenance=Provenance(d['measurement_status'].lower()))
-            for name, d in raw.items()}
+                provenance=Provenance(d['measurement_status'].lower()), **caps)
+
+        self.models: dict[str, ModelSpec] = {
+            n: spec(n, d, predicate_classes=tuple(PredicateClass(c.lower())
+                                                  for c in d['classes']))
+            for n, d in raw.get('predicate_models', {}).items()}
+        self.derivers: dict[str, ModelSpec] = {
+            n: spec(n, d, methods=tuple(Derivation(m.lower()) for m in d['methods']))
+            for n, d in raw.get('derivation_models', {}).items()}
+        self.retrievers: dict[str, ModelSpec] = {
+            n: spec(n, d, retrieval_role=d['role'])
+            for n, d in raw.get('retrieval_models', {}).items()}
+        self.by_name: dict[str, ModelSpec] = {
+            **self.models, **self.derivers, **self.retrievers}
+
         self._sel = {PredicateClass(k.lower()): v
                      for k, v in priors.get('selectivity_by_class', {}).items()}
         self.sql_seconds_per_1k = priors.get('sql_seconds_per_1k_rows', 0.0001)
@@ -96,26 +115,35 @@ class StaticEstimator(CardinalityModel, CostModel):
         return self._sel.get(cls, 0.5)
 
     def spec(self, model: str) -> ModelSpec | None:
-        return self.models.get(model)
+        return self.by_name.get(model)
 
     def eligible_models(self, cls: PredicateClass) -> tuple[ModelSpec, ...]:
-        """Models that can serve this class, cheapest first — the order model binding
-        walks to take the cheapest one clearing the accuracy floor."""
+        """Models that can answer this predicate class, cheapest first — the order
+        binding walks to take the cheapest one clearing the accuracy floor.
+
+        Reads only the predicate section, so a transformer can never appear here."""
         return tuple(sorted((m for m in self.models.values() if cls in m.predicate_classes),
                             key=lambda m: m.seconds_per_item))
 
+    def derivation_model(self, method: Derivation) -> ModelSpec | None:
+        """The cheapest model that performs this derivation, or None if it is bespoke
+        deterministic code rather than a model."""
+        cs = sorted((m for m in self.derivers.values() if method in m.methods),
+                    key=lambda m: m.seconds_per_item)
+        return cs[0] if cs else None
+
     def unit_cost_s(self, model: str) -> float:
-        m = self.models.get(model)
+        m = self.by_name.get(model)
         return m.seconds_per_item if m else 1e9
 
     def is_remote(self, model: str) -> bool:
-        m = self.models.get(model)
+        m = self.by_name.get(model)
         return bool(m and m.is_remote)
 
     def worst_provenance(self) -> Provenance:
         """The weakest evidence behind any number we would display. One placeholder and
         the whole funnel is a placeholder."""
-        ps = {m.provenance for m in self.models.values()}
+        ps = {m.provenance for m in self.by_name.values()}
         if Provenance.PLACEHOLDER in ps or any(True for _ in placeholders(self.stats)):
             return Provenance.PLACEHOLDER
         if Provenance.EXTRAPOLATED in ps: return Provenance.EXTRAPOLATED

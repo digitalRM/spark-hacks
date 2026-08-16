@@ -13,7 +13,7 @@ Expand/Collapse pair. Those are lowering, not optimization.
 Cost: one walk of the AST. No I/O, no model calls.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Callable
 
 from query_language.ast import (
@@ -30,6 +30,7 @@ from optimizer.plan import (
     PredicateClass, Project, Provenance, Scan, SelectivitySource, SemanticFilter, Union,
     Aggregate, grain,
 )
+from optimizer.plan_editing import map_nodes
 from optimizer.stats import ACTIVE, CorpusStats, derivation, fanout
 
 UNBOUND = 'UNBOUND'
@@ -195,8 +196,16 @@ def _condition(c: Condition, child: PlanNode, ctx: _Ctx) -> PlanNode:
                 child = _condition(ch, child, ctx)
             return child
         case Or(children):
+            # Each branch needs its *own* copy of the input, not a shared reference.
+            # Sharing would make the plan a DAG: one Scan reachable by two paths, so it
+            # walks twice, serializes twice, and cannot be addressed unambiguously by an
+            # editor that identifies nodes by id. Copying is also the honest cost model —
+            # DNF clauses really are independent funnels that really do both scan, and the
+            # memo cache is what makes the duplicated work cheap rather than the plan
+            # pretending it does not happen.
             return Union(ctx.nid('union'),
-                         tuple(_condition(ch, child, ctx) for ch in children))
+                         tuple(_condition(ch, child if i == 0 else _freshen(child, ctx), ctx)
+                               for i, ch in enumerate(children)))
         case Not(Fuzzy() as f):
             return _fuzzy(f, child, ctx, negated=True)
         case Not(child_cond):
@@ -205,6 +214,13 @@ def _condition(c: Condition, child: PlanNode, ctx: _Ctx) -> PlanNode:
             return _fuzzy(f, child, ctx, negated=False)
         case _:
             return _exact(c, child, ctx, negated=False)
+
+def _freshen(n: PlanNode, ctx: _Ctx) -> PlanNode:
+    """Deep-copy a subtree with new node ids, keeping each id's kind prefix so a copied
+    Scan is still recognisably a scan in the UI."""
+    def rebuild(m: PlanNode) -> PlanNode:
+        return replace(m, node_id=ctx.nid(m.node_id.rstrip('0123456789')))
+    return map_nodes(n, rebuild)
 
 def _exact(c: Condition, child: PlanNode, ctx: _Ctx, negated: bool) -> ExactFilter:
     """A deterministic predicate as its own operator. Pass 2 absorbs these into the Scan;
