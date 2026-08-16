@@ -12,22 +12,19 @@ const getReduceMotion = () => window.matchMedia(REDUCE_MOTION).matches;
 const getReduceMotionServer = () => false;
 
 type Options = {
-  /** ms per character while typing */
+  /** ms per char while typing */
   typeSpeed?: number;
-  /** ms per character while deleting */
+  /** ms per char while deleting */
   deleteSpeed?: number;
-  /** ms to hold a fully-typed phrase */
+  /** ms to hold a fully typed phrase */
   holdMs?: number;
-  /** ms to wait after clearing before typing the next phrase */
+  /** ms to wait after clearing before the next phrase */
   gapMs?: number;
-  /** when false, the animation freezes in place */
+  /** false = animation freezes in place */
   active?: boolean;
 };
 
-/**
- * Cycles through `phrases` with a typewriter effect.
- * Returns the current text plus whether the cursor should be shown.
- */
+/** cycles thru `phrases` typewriter-style. returns current text + whether to show cursor */
 export function useTypewriter(
   phrases: string[],
   {
@@ -47,14 +44,14 @@ export function useTypewriter(
 
   const phrase = phrases[index % phrases.length] ?? "";
 
-  // Reduced-motion users get a static first phrase, no animation.
+  // reduced-motion users just get the first phrase, no animation
   const reduceMotion = useSyncExternalStore(
     subscribeReduceMotion,
     getReduceMotion,
     getReduceMotionServer,
   );
 
-  // Main state machine.
+  // main state machine
   useEffect(() => {
     if (!active || reduceMotion || phrases.length === 0) return;
 
@@ -101,7 +98,7 @@ export function useTypewriter(
     gapMs,
   ]);
 
-  // Blink the cursor only while holding (steady while typing/deleting).
+  // only blink the cursor while holding (steady while typing/deleting)
   const holding = phase === "typing" && length >= phrase.length;
   useEffect(() => {
     if (!active || !holding) return;

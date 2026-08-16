@@ -1,8 +1,10 @@
-// Placeholder compiled-BQL AST until the compiler backend is wired up.
+import type { BqlQuery, FieldRef } from "@/lib/bql";
+
+// placeholder compiled-bql ast untill the compiler backend is wired up
 export const DUMMY_QUERY =
   "9th Circuit qualified-immunity cases citing Graham v. Connor, where the scanned record contains a photographic exhibit, and a judge expressed skepticism at oral argument.";
 
-/** Example searches cycled through the input placeholder. */
+/** example searches cycled thru the input placeholder */
 export const EXAMPLE_QUERIES = [
   DUMMY_QUERY,
   "Second Circuit securities-fraud opinions since 2020 that reversed a motion to dismiss.",
@@ -12,56 +14,102 @@ export const EXAMPLE_QUERIES = [
   "Federal district court orders granting class certification in wage-and-hour cases.",
 ];
 
-export type BqlColumn = { table: string; column: string };
-export type BqlJoin = { table: string; on: { left: string; right: string } };
-export type BqlCondition = {
-  fn: "EXACT" | "FUZZY";
-  field: string;
-  value: string;
-};
-export type BqlQuery = {
-  type: "query";
-  select: BqlColumn[];
-  from: string;
-  joins: BqlJoin[];
-  where: { op: "AND" | "OR"; args: BqlCondition[] };
-  limit: number;
-};
+const f = (source: string, column: string): FieldRef => ({
+  type: "field_ref",
+  source,
+  column,
+});
 
+/**
+ * same wire shape `query_language/serialize.py` emits for `grammar.example()`, but
+ * hitting the whole grammar: nested joins, comparisons, between / in-list, multi-field fuzzy, nested `not (a or b)`
+ */
 export const DUMMY_BQL_AST: BqlQuery = {
-  type: "query",
-  select: [
-    { table: "cluster", column: "id" },
-    { table: "cluster", column: "case_name" },
-  ],
-  from: "cluster",
-  joins: [
-    { table: "docket", on: { left: "cluster.docket_id", right: "docket.id" } },
-    { table: "opinion", on: { left: "opinion.cluster_id", right: "cluster.id" } },
-    {
-      table: "citation",
-      on: { left: "citation.citing_opinion_id", right: "opinion.id" },
+  select: [f("cluster", "id"), f("cluster", "case_name")],
+  source: {
+    type: "join",
+    condition: {
+      type: "comparison",
+      op: "=",
+      field1: f("citation", "citing_opinion_id"),
+      field2: f("opinion", "id"),
     },
-  ],
+    left: {
+      type: "join",
+      condition: {
+        type: "comparison",
+        op: "=",
+        field1: f("opinion", "cluster_id"),
+        field2: f("cluster", "id"),
+      },
+      left: {
+        type: "join",
+        condition: {
+          type: "comparison",
+          op: "=",
+          field1: f("cluster", "docket_id"),
+          field2: f("docket", "id"),
+        },
+        left: "cluster",
+        right: "docket",
+      },
+      right: "opinion",
+    },
+    right: "citation",
+  },
   where: {
-    op: "AND",
-    args: [
-      { fn: "EXACT", field: "docket.court_id", value: "ca9" },
-      { fn: "EXACT", field: "citation.cited_cite", value: "490 U.S. 386" },
+    type: "and",
+    children: [
       {
-        fn: "FUZZY",
-        field: "opinion.plain_text",
-        value: "qualified immunity for excessive force",
+        type: "comparison",
+        op: "=",
+        field1: f("docket", "court_id"),
+        field2: "ca9",
       },
       {
-        fn: "FUZZY",
-        field: "cluster.scan_pages",
-        value: "contains a photographic exhibit",
+        type: "comparison",
+        op: "=",
+        field1: f("citation", "cited_cite"),
+        field2: "490 U.S. 386",
       },
       {
-        fn: "FUZZY",
-        field: "docket.argument",
-        value: "a judge expressed skepticism",
+        type: "between",
+        field: f("cluster", "date_filed"),
+        low: "2015-01-01",
+        high: "2024-12-31",
+      },
+      {
+        type: "fuzzy",
+        field: [f("opinion", "plain_text")],
+        text: "qualified immunity for excessive force",
+      },
+      {
+        type: "fuzzy",
+        field: [f("cluster", "scan_pages")],
+        text: "contains a photographic exhibit",
+      },
+      {
+        type: "fuzzy",
+        field: [f("docket", "argument"), f("docket", "argument_transcript")],
+        text: "a judge expressed skepticism",
+      },
+      {
+        type: "not",
+        child: {
+          type: "or",
+          children: [
+            {
+              type: "in_list",
+              field: f("cluster", "precedential_status"),
+              values: ["Unpublished", "Errata"],
+            },
+            {
+              type: "like",
+              field: f("cluster", "case_name"),
+              pattern: "%In re%",
+            },
+          ],
+        },
       },
     ],
   },

@@ -1,15 +1,33 @@
 "use client";
 
-import { FormEvent, KeyboardEvent, useRef, useState } from "react";
+import { FormEvent, KeyboardEvent, useEffect, useRef, useState } from "react";
 import JsonTree from "@/components/JsonTree";
-import QueryPlan from "@/components/QueryPlan";
+import QueryBrief, { SearchedAcross } from "@/components/QueryBrief";
+import NotchedPanel from "@/components/NotchedPanel";
 import BackgroundLines from "@/components/BackgroundLines";
-import { DUMMY_BQL_AST, EXAMPLE_QUERIES, type BqlQuery } from "@/lib/dummyBql";
+import BackgroundText from "@/components/BackgroundText";
+import FlowLines from "@/components/FlowLines";
+import TextShader from "@/components/TextShader";
+import ThinkingLabel from "@/components/ThinkingLabel";
+import AutoHeight from "@/components/AutoHeight";
+import { EXAMPLE_QUERIES, type JsonValue } from "@/lib/dummyBql";
+import type { BqlQuery } from "@/lib/bql";
+import { compileQuery } from "@/lib/compile";
 import { useTypewriter } from "@/lib/useTypewriter";
+
+/** how long the circular reveal takes to clear the text shader */
+const REVEAL_MS = 1100;
+
+/** fake "run" time in ms; override w/ `?run=3000` while developing */
+function runDurationMs() {
+  if (typeof window === "undefined") return 10_000;
+  const v = Number(new URLSearchParams(window.location.search).get("run"));
+  return Number.isFinite(v) && v > 0 ? v : 10_000;
+}
 
 type View = "query" | "tree" | "json";
 const VIEWS: { id: View; label: string }[] = [
-  { id: "query", label: "Query" },
+  { id: "query", label: "Summary" },
   { id: "tree", label: "Tree" },
   { id: "json", label: "JSON" },
 ];
@@ -19,26 +37,59 @@ export default function Home() {
   const [submitted, setSubmitted] = useState(false);
   const [compiling, setCompiling] = useState(false);
   const [ast, setAst] = useState<BqlQuery | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [view, setView] = useState<View>("query");
+  // result phase: once we have a plan it "runs" for a bit, then shows a result
+  const [resultPhase, setResultPhase] = useState<
+    "idle" | "running" | "revealing" | "done"
+  >("idle");
+  // bumped per search so the timer re-arms even if the ast object is identical
+  const [run, setRun] = useState(0);
+  useEffect(() => {
+    if (!ast) return;
+    // TODO: swap fixed delay for the real runtime call
+    const runMs = runDurationMs();
+    const t1 = window.setTimeout(() => setResultPhase("revealing"), runMs);
+    // reveal wipe (REVEAL_MS) + a beat for "done!" to fade, then show result
+    const t2 = window.setTimeout(
+      () => setResultPhase("done"),
+      runMs + REVEAL_MS + 500,
+    );
+    return () => {
+      window.clearTimeout(t1);
+      window.clearTimeout(t2);
+    };
+  }, [ast, run]);
+  // once the title finishes shrinking into the header, pin a fixed copy
+  // so it stays put while results scroll underneath
+  const [pinned, setPinned] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
-  // Animated placeholder; freezes as soon as the user starts typing.
+  // animated placeholder; pauses while theres text in the box, resumes when empty
+  // again (incl. after a search was sent)
   const typewriter = useTypewriter(EXAMPLE_QUERIES, {
-    active: query.length === 0 && !submitted,
+    active: query.length === 0,
   });
   const placeholder = typewriter.text + (typewriter.cursor ? "|" : "");
 
-  function compile() {
+  async function compile() {
     const text = query.trim();
     if (!text || compiling) return;
     setSubmitted(true);
     setCompiling(true);
     setAst(null);
-    // TODO: replace with a call to the BQL compiler. Dummy AST for now.
-    window.setTimeout(() => {
-      setAst(DUMMY_BQL_AST);
+    setError(null);
+    setResultPhase("idle");
+    try {
+      // real compiler if NEXT_PUBLIC_COMPILER_URL is set, dummy ast otherwise
+      setAst(await compileQuery(text));
+      setResultPhase("running");
+      setRun((r) => r + 1);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Couldn't compile that query.");
+    } finally {
       setCompiling(false);
-    }, 600);
+    }
   }
 
   function handleSubmit(e: FormEvent<HTMLFormElement>) {
@@ -55,10 +106,28 @@ export default function Home() {
 
   return (
     <main className="flex flex-1 flex-col px-4 py-8">
-      {/* Lines flowing into the input from the left and out to the right; vanish on submit. */}
+      {/* lines flowing into the input from the left and out the right; gone on submit */}
+      {/* faint legal-text texture behind everything */}
+      <BackgroundText roam={submitted ? "sides" : "landing"} />
       <BackgroundLines active={!submitted} targetRef={inputRef} />
 
-      {/* Top spacer: shrinks to 0 on submit, sliding the query box upward. */}
+      {/* pinned title: sits exactly where the in-flow title landed after the shrink,
+          on a white -> transparent gradient so scrolled results fade out under it */}
+      {pinned && (
+        <div
+          aria-hidden
+          className="pointer-events-none fixed inset-x-0 top-0 z-[200] bg-gradient-to-b from-white from-60% to-white/0 px-4 pb-8 pt-8 text-center"
+        >
+          <span
+            className="block font-semibold tracking-tighter"
+            style={{ fontSize: "1.5rem" }}
+          >
+            Amicus
+          </span>
+        </div>
+      )}
+
+      {/* top spacer: shrinks to 0 on submit so the query box slides up */}
       <div
         aria-hidden
         className="transition-[flex-grow] duration-700 ease-[cubic-bezier(0.22,1,0.36,1)]"
@@ -67,10 +136,17 @@ export default function Home() {
 
       <div className="mx-auto flex w-full flex-col gap-6">
         <section className="flex flex-col gap-4 max-w-3xl mx-auto w-full">
-          <div className="text-center">
+          <div className="text-center" data-bg-clear>
             <h1
               className="font-semibold tracking-tighter transition-[font-size] duration-700 ease-[cubic-bezier(0.22,1,0.36,1)]"
-              style={{ fontSize: submitted ? "1.5rem" : "2.5rem" }}
+              style={{
+                fontSize: submitted ? "1.5rem" : "2.5rem",
+                // keep taking up space so layout dosnt shift once the fixed copy takes over
+                visibility: pinned ? "hidden" : "visible",
+              }}
+              onTransitionEnd={(e) => {
+                if (e.propertyName === "font-size") setPinned(submitted);
+              }}
             >
               Amicus
             </h1>
@@ -87,6 +163,7 @@ export default function Home() {
           </div>
 
           <form
+            data-bg-clear
             onSubmit={handleSubmit}
             className="flex flex-col gap-3 rounded-2xl focus-within:border-neutral-400 z-100 relative"
           >
@@ -116,12 +193,11 @@ export default function Home() {
         </section>
 
         {submitted && (
-          <section
-            key={ast ? "ready" : "loading"}
-            className="animate-rise-in rounded-[22px] border border-neutral-200 bg-white p-4 max-w-4xl mx-auto w-full"
-          >
-            <header className="mb-4 flex items-center justify-between gap-4">
-              <h2 className="text-sm font-semibold">Compiled BQL</h2>
+          <div data-bg-clear className="max-w-4xl mx-auto w-full">
+          <NotchedPanel
+            className="animate-rise-in"
+            title="Compiled Search"
+            actions={
               <div
                 role="tablist"
                 className="flex rounded-xl bg-neutral-100 p-1 text-sm"
@@ -143,26 +219,89 @@ export default function Home() {
                   </button>
                 ))}
               </div>
-            </header>
-
-            {!ast ? (
-              <p className="py-8 text-center text-sm text-neutral-400">
+            }
+          >
+            {/* panel mounts once; only the body cross-fades loading -> ready */}
+            {error ? (
+              <p className="rounded-xl border border-neutral-200 py-8 text-center text-sm text-rose-600 rounded-tr-lg">
+                {error}
+              </p>
+            ) : !ast ? (
+              <p className="rounded-xl border border-neutral-200 py-8 text-center text-sm text-neutral-400 -m-1.5 -mt-3">
                 Compiling your query…
               </p>
-            ) : view === "query" ? (
-              <QueryPlan query={ast} />
-            ) : view === "json" ? (
-              <pre className="overflow-x-auto rounded-xl bg-neutral-50 p-4 font-mono text-[13px] leading-relaxed text-neutral-800">
-                {JSON.stringify(ast, null, 2)}
-              </pre>
             ) : (
-              <JsonTree data={ast} />
+              <div key="ready" className="animate-fade-in">
+                {view === "query" ? (
+                  <QueryBrief query={ast} />
+                ) : view === "json" ? (
+                  <pre className="overflow-x-auto rounded-xl bg-neutral-50 p-4 font-mono text-[13px] leading-relaxed text-neutral-800">
+                    {JSON.stringify(ast, null, 2)}
+                  </pre>
+                ) : (
+                  <JsonTree data={ast as unknown as JsonValue} />
+                )}
+              </div>
             )}
+          </NotchedPanel>
+          </div>
+        )}
+
+        {/* between the cards: sources on the left; right ~28% has lines carrying
+            colored pulses from the plan down into the result while it runs */}
+        {ast && (
+          <div
+            data-bg-clear
+            className="animate-fade-in max-w-4xl mx-auto w-full flex items-stretch -my-6"
+          >
+            <div className="flex-1 px-5 py-6">
+              {view === "query" && (
+                <SearchedAcross query={ast} done={resultPhase === "done"} />
+              )}
+            </div>
+            <div className="relative w-[28%] min-h-[120px] mr-6">
+              <FlowLines
+                active={resultPhase === "running"}
+                className="absolute inset-0 h-full w-full"
+              />
+            </div>
+          </div>
+        )}
+
+        {/* search result: shows up once a plan exists; "runs", then shows the result */}
+        {ast && resultPhase !== "idle" && (
+          <section
+            data-bg-clear
+            className="animate-rise-in max-w-4xl mx-auto w-full overflow-hidden rounded-[22px] border border-neutral-200 bg-white -mt-4"
+          >
+            {/* height eases between the tall thinking state and the result */}
+            <AutoHeight>
+              {resultPhase === "running" || resultPhase === "revealing" ? (
+                // empty state: legal text as a shader field while the plan runs;
+                // on "revealing" a white circle wipes it away from the center
+                <div className="relative h-[350px]">
+                  <TextShader
+                    active
+                    hole={{ rx: 150, ry: 34, feather: 56 }}
+                    reveal={resultPhase === "revealing"}
+                    revealMs={REVEAL_MS}
+                    className="absolute -inset-1"
+                  />
+                  <p className="pointer-events-none absolute inset-0 flex items-center justify-center">
+                    <ThinkingLabel done={resultPhase === "revealing"} />
+                  </p>
+                </div>
+              ) : (
+                <p className="animate-fade-in p-4 text-[15px] leading-relaxed">
+                  result
+                </p>
+              )}
+            </AutoHeight>
           </section>
         )}
       </div>
 
-      {/* Bottom spacer keeps the box centered before submit. */}
+      {/* bottom spacer keeps the box centered before submit */}
       <div aria-hidden className="flex-1" />
     </main>
   );

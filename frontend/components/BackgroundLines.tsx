@@ -3,23 +3,42 @@
 import { RefObject, useEffect, useState } from "react";
 
 type Props = {
-  /** When false, the lines fade out. */
+  /** false = lines fade out */
   active: boolean;
-  /** Element the lines flow into (left edge) and out of (right edge). */
+  /** element the lines flow into (left edge) and out of (right edge) */
   targetRef: RefObject<HTMLElement | null>;
-  /** Number of lines. */
+  /** number of lines */
   count?: number;
-  /** How far (px) the lines reach past the box border into the box. */
+  /** px the lines reach past the box border into the box */
   reach?: number;
 };
 
-/** Duration of the centre-out dissolve when deactivated. */
+/** duration of the centre-out dissolve on deactivate */
 const WIPE_MS = 550;
 
 /**
- * File cards flowing into the box. `line` is the line index, `side` which
- * half it rides (both travel edge → box), `dur` travel time (s), `offset`
- * start offset (s) so the stream is already populated on load.
+ * one hue per line, top -> bottom. `line` is the stroke, cards use `stroke` for
+ * outlines, `fill` for paper, `text` for the litle text rules
+ */
+type Hue = { line: string; stroke: string; fill: string; text: string };
+const HUES: Hue[] = [
+  { line: "#7dd3fc", stroke: "#38bdf8", fill: "#e0f2fe", text: "#7dd3fc" }, // sky
+  { line: "#93c5fd", stroke: "#60a5fa", fill: "#dbeafe", text: "#93c5fd" }, // blue
+  { line: "#a5b4fc", stroke: "#818cf8", fill: "#e0e7ff", text: "#a5b4fc" }, // indigo
+  { line: "#c4b5fd", stroke: "#a78bfa", fill: "#ede9fe", text: "#c4b5fd" }, // violet
+  { line: "#d8b4fe", stroke: "#c084fc", fill: "#f3e8ff", text: "#d8b4fe" }, // purple
+  { line: "#d8b4fe", stroke: "#c084fc", fill: "#f3e8ff", text: "#d8b4fe" }, // purple
+  { line: "#c4b5fd", stroke: "#a78bfa", fill: "#ede9fe", text: "#c4b5fd" }, // violet
+  { line: "#a5b4fc", stroke: "#818cf8", fill: "#e0e7ff", text: "#a5b4fc" }, // indigo
+  { line: "#93c5fd", stroke: "#60a5fa", fill: "#dbeafe", text: "#93c5fd" }, // blue
+  { line: "#7dd3fc", stroke: "#38bdf8", fill: "#e0f2fe", text: "#7dd3fc" }, // sky
+];
+const hueFor = (i: number) => HUES[i % HUES.length];
+
+/**
+ * file cards flowing into the box. `line` = line index, `side` = which half it rides
+ * (both travel edge -> box), `dur` = travel time s, `offset` = start offset s so the
+ * stream is already populated on load
  */
 const CARDS: { side: "l" | "r"; line: number; dur: number; offset: number }[] = [
   { side: "l", line: 1, dur: 8, offset: 0 },
@@ -32,21 +51,16 @@ const CARDS: { side: "l" | "r"; line: number; dur: number; offset: number }[] = 
   { side: "r", line: 7, dur: 7.2, offset: 2.7 },
 ];
 
-/**
- * A little document (paper with a folded corner and text lines) sitting in a
- * white, bordered, rounded container — roughly `p-1 border border-neutral-200 rounded-xl`.
- */
-function FileCard() {
+/** little doc (paper w/ folded corner + text lines) tinted to its line's hue */
+function FileCard({ hue }: { hue: Hue }) {
   return (
     <g transform="scale(1.3)">
-      {/* container */}
-
       <g transform="translate(-9 -11)">
-        {/* paper — slightly rounded corners, folded top-right */}
+        {/* paper - slightly rounded corners, folded top-right */}
         <path
           d="M 3 1 H 12 L 17 6 V 19 A 2 2 0 0 1 15 21 H 3 A 2 2 0 0 1 1 19 V 3 A 2 2 0 0 1 3 1 Z"
-          fill="#fff"
-          stroke="#c4c4c4"
+          fill={hue.fill}
+          stroke={hue.stroke}
           strokeWidth="1"
           strokeLinejoin="round"
         />
@@ -54,12 +68,12 @@ function FileCard() {
         <path
           d="M 12 1 V 4.5 A 1.5 1.5 0 0 0 13.5 6 H 17"
           fill="none"
-          stroke="#c4c4c4"
+          stroke={hue.stroke}
           strokeWidth="1"
           strokeLinejoin="round"
         />
         {/* text lines */}
-        <g stroke="#d9d9d9" strokeWidth="1" strokeLinecap="round">
+        <g stroke={hue.text} strokeWidth="1" strokeLinecap="round">
           <line x1="4" y1="10" x2="13" y2="10" />
           <line x1="4" y1="13" x2="14" y2="13" />
           <line x1="4" y1="16" x2="11" y2="16" />
@@ -73,10 +87,9 @@ type Box = { left: number; right: number; top: number; bottom: number };
 type Size = { w: number; h: number };
 
 /**
- * Thin lines that sweep in from the left edge of the viewport, converge into
- * the left side of the target box, then fan back out from its right side to
- * the right edge of the viewport. Curves are cubic Béziers with horizontal
- * tangents at both ends so they enter/exit the box cleanly.
+ * thin lines sweeping in from the left viewport edge, converging into the target box's
+ * left side, then fanning back out from its right side to the right edge. cubic beziers
+ * w/ horizontal tangents both ends so they enter/exit the box cleanly
  */
 export default function BackgroundLines({
   active,
@@ -87,8 +100,7 @@ export default function BackgroundLines({
   const [box, setBox] = useState<Box | null>(null);
   const [size, setSize] = useState<Size | null>(null);
 
-  // Track the box only while active. Once inactive the geometry is frozen so
-  // the lines don't chase the box as it slides up — they just dissolve in place.
+
   useEffect(() => {
     const el = targetRef.current;
     if (!el || !active) return;
@@ -121,9 +133,10 @@ export default function BackgroundLines({
   const ready = box !== null && size !== null;
 
   let paths: { left: string; right: string; strong: boolean }[] = [];
+  let areas: { left: string; right: string } | null = null;
   if (ready) {
     const { w, h } = size;
-    // Vertical spread at the viewport edges vs. inside the box.
+    // vertical spread at the viewport edges vs. inside the box
     const edgeTop = h * 0.06;
     const edgeBot = h * 0.94;
     const inset = Math.min(10, (box.bottom - box.top) * 0.15);
@@ -135,19 +148,32 @@ export default function BackgroundLines({
       const yEdge = edgeTop + (edgeBot - edgeTop) * t;
       const yBox = boxTop + (boxBot - boxTop) * t;
 
-      // Left: viewport edge → just inside the box's left edge. Control points
-      // share an x so the curve leaves/arrives horizontally.
+      // left
       const lEnd = box.left + reach;
       const lcx = box.left * 0.5;
       const left = `M 0 ${yEdge.toFixed(1)} C ${lcx.toFixed(1)} ${yEdge.toFixed(1)}, ${lcx.toFixed(1)} ${yBox.toFixed(1)}, ${lEnd.toFixed(1)} ${yBox.toFixed(1)}`;
 
-      // Right: just inside the box's right edge → viewport edge.
+      // right
       const rStart = box.right - reach;
       const rcx = box.right + (w - box.right) * 0.5;
       const right = `M ${rStart.toFixed(1)} ${yBox.toFixed(1)} C ${rcx.toFixed(1)} ${yBox.toFixed(1)}, ${rcx.toFixed(1)} ${yEdge.toFixed(1)}, ${w.toFixed(1)} ${yEdge.toFixed(1)}`;
 
       return { left, right, strong: i % 3 === 0 };
     });
+
+    const yEdgeB = edgeBot.toFixed(1);
+    const yEdgeT = edgeTop.toFixed(1);
+    const yBoxT = boxTop.toFixed(1);
+    const yBoxB = boxBot.toFixed(1);
+    const lEnd = (box.left + reach).toFixed(1);
+    const lcx = (box.left * 0.5).toFixed(1);
+    const rStart = (box.right - reach).toFixed(1);
+    const rcx = (box.right + (w - box.right) * 0.5).toFixed(1);
+    const W = w.toFixed(1);
+    areas = {
+      left: `M 0 ${yEdgeT} C ${lcx} ${yEdgeT}, ${lcx} ${yBoxT}, ${lEnd} ${yBoxT} L ${lEnd} ${yBoxB} C ${lcx} ${yBoxB}, ${lcx} ${yEdgeB}, 0 ${yEdgeB} Z`,
+      right: `M ${rStart} ${yBoxT} C ${rcx} ${yBoxT}, ${rcx} ${yEdgeT}, ${W} ${yEdgeT} L ${W} ${yEdgeB} C ${rcx} ${yEdgeB}, ${rcx} ${yBoxB}, ${rStart} ${yBoxB} Z`,
+    };
   }
 
   return (
@@ -155,9 +181,7 @@ export default function BackgroundLines({
       aria-hidden
       className="pointer-events-none fixed inset-0 -z-10 h-full w-full transition-opacity ease-out"
       style={{
-        // Fade in on mount; on deactivate the mask wipe below does the work,
-        // and opacity only drops after it has finished (keeps things tidy on
-        // re-activation).
+
         opacity: active && ready ? 1 : 0,
         transitionDuration: active ? "500ms" : "0ms",
         transitionDelay: active ? "0ms" : `${WIPE_MS}ms`,
@@ -166,15 +190,15 @@ export default function BackgroundLines({
       preserveAspectRatio="none"
     >
       <defs>
-        {/* Soften the lines toward the far left/right edges of the viewport. */}
+        {/* soften the lines toward the far left/right viewport edges */}
         <linearGradient id="bg-lines-fade" x1="0" x2="1" y1="0" y2="0">
           <stop offset="0" stopColor="#fff" stopOpacity="0" />
           <stop offset="0.12" stopColor="#fff" />
           <stop offset="0.88" stopColor="#fff" />
           <stop offset="1" stopColor="#fff" stopOpacity="0" />
         </linearGradient>
-        {/* Black (= hidden) in the middle, soft toward its own ends. Scaled
-            up from the centre on deactivate so the lines dissolve outward. */}
+        {/* black (= hidden) in the middle, soft toward its ends. scaled up from
+            the centre on deactivate so the lines disolve outward */}
         <linearGradient id="bg-lines-wipe" x1="0" x2="1" y1="0" y2="0">
           <stop offset="0" stopColor="#000" stopOpacity="0" />
           <stop offset="0.4" stopColor="#000" />
@@ -206,6 +230,12 @@ export default function BackgroundLines({
           />
         </mask>
       </defs>
+      {areas && (
+        <g fill="none" stroke="none">
+          <path data-bg-clear-area d={areas.left} />
+          <path data-bg-clear-area d={areas.right} />
+        </g>
+      )}
       <g mask="url(#bg-lines-m)">
         <g fill="none">
           {paths.map((p, i) => (
@@ -213,14 +243,14 @@ export default function BackgroundLines({
               <path
                 id={`bg-line-l-${i}`}
                 d={p.left}
-                stroke={p.strong ? "#d4d4d4" : "#e5e5e5"}
+                stroke={hueFor(i).line}
                 strokeWidth={p.strong ? 1.5 : 1}
                 vectorEffect="non-scaling-stroke"
               />
               <path
                 id={`bg-line-r-${i}`}
                 d={p.right}
-                stroke={p.strong ? "#d4d4d4" : "#e5e5e5"}
+                stroke={hueFor(i).line}
                 strokeWidth={p.strong ? 1.5 : 1}
                 vectorEffect="non-scaling-stroke"
               />
@@ -228,9 +258,9 @@ export default function BackgroundLines({
           ))}
         </g>
 
-        {/* Case-file cards travelling along the lines into the box from both sides. */}
+        {/* case-file cards riding the lines into the box from both sides */}
         {ready &&
-          // Never on the outermost (top/bottom) lines.
+          // never on the outermost (top/bottom) lines
           CARDS.filter((c) => c.line > 0 && c.line < count - 1).map((c) => {
             const dur = c.dur;
             const begin = -c.offset;
@@ -241,15 +271,15 @@ export default function BackgroundLines({
                   begin={`${begin}s`}
                   repeatCount="indefinite"
                   calcMode="spline"
-                  // Left paths run edge → box; right paths run box → edge,
-                  // so ride those backwards to also travel into the box.
+                  // left paths run edge -> box, right paths run box -> edge,
+                  // so ride those backwards to also travel into the box
                   keyPoints={c.side === "l" ? "0;1" : "1;0"}
                   keyTimes="0;1"
                   keySplines="0.35 0 0.65 1"
                 >
                   <mpath href={`#bg-line-${c.side}-${c.line}`} />
                 </animateMotion>
-                {/* Fade in leaving the edge, dissolve as it enters the box. */}
+                {/* fade in leaving the edge, dissolve as it enters the box */}
                 <animate
                   attributeName="opacity"
                   values="0;1;1;0"
@@ -258,7 +288,7 @@ export default function BackgroundLines({
                   begin={`${begin}s`}
                   repeatCount="indefinite"
                 />
-                <FileCard />
+                <FileCard hue={hueFor(c.line)} />
               </g>
             );
           })}
