@@ -304,10 +304,12 @@ DATAFORM_SCHEMA: Schema = FrozenDict.of({
 
 
 if __name__ == "__main__":
-    # smoke test: every table is a well-formed ObjectType, and a query against
-    # this schema that reaches into audio timestamps/location typechecks.
+    # smoke test: every table is a well-formed ObjectType, and real queries
+    # against this schema typecheck -- including the two cases that used to
+    # fail before query_language's Optional-unwrap + unnest-path fix
+    # (see PR https://github.com/digitalRM/spark-hacks/pull/1).
     from query_language.ast import (
-        Comparison, ComparisonOperator, FieldRef, Fuzzy, Query, TableRef, Unnest,
+        Between, FieldRef, Fuzzy, Like, Query, TableRef, Unnest,
     )
     from query_language.typechecker import typecheck
 
@@ -323,18 +325,50 @@ if __name__ == "__main__":
     typecheck(q, DATAFORM_SCHEMA)
     print("fuzzy-over-text + unnest-audio query typechecks OK")
 
-    # select each audio asset as a row (audio_ref/captured_at/location/
-    # timestamp_index all present on its type) -- this is as far as the
-    # *current* AST goes for array-of-struct fields; see the KNOWN GAP note
-    # below for why a where-clause into a sub-field of an unnested element
-    # (e.g. filtering by unnest(media.audio).captured_at) does not typecheck
-    # yet, even though the Schema models it precisely.
-    per_asset_query = Query(
-        select=(FieldRef("d", ("title",)), Unnest(FieldRef("d", ("media", "audio")))),
+    # previously failed: Between on a nullable TimestampType field
+    # (query_language raised "between requires numeric/timestamp field, got
+    # OptionalType(...)" because OptionalType wasn't unwrapped first).
+    dob_query = Query(
+        select=(FieldRef("p", ("name_last",)),),
+        source=TableRef("person", "p"),
+        where=Between(FieldRef("p", ("date_of_birth",)), "1900-01-01", "1950-01-01"),
+        group_by=(),
+        limit=None,
+    )
+    typecheck(dob_query, DATAFORM_SCHEMA)
+    print("between on Person.date_of_birth (nullable TimestampType) typechecks OK")
+
+    # previously impossible: filter on a sub-field of an unnested
+    # array-of-struct element -- Unnest had no path, and Fuzzy/Like/Between
+    # couldn't reach an unnested audio asset's own audio_ref/captured_at.
+    # This is the actual "replayability" scenario: find oral-argument audio
+    # whose content matches, addressed by the individual asset (audio_ref),
+    # not the whole document.
+    audio_fuzzy_query = Query(
+        select=(FieldRef("d", ("title",)),),
         source=TableRef("document", "d"),
-        where=None,
+        where=Fuzzy(
+            Unnest(FieldRef("d", ("media", "audio")), ("audio_ref",)),
+            "oral argument mentioning excessive force",
+        ),
         group_by=(),
         limit=10,
     )
-    typecheck(per_asset_query, DATAFORM_SCHEMA)
-    print("select unnest(media.audio) as a row (captured_at/location/timestamp_index all typed) OK")
+    typecheck(audio_fuzzy_query, DATAFORM_SCHEMA)
+    print("fuzzy on unnest(media.audio).audio_ref (per-asset, not whole-document) typechecks OK")
+
+    # filter individual transcript segments by a text pattern -- this is what
+    # makes an audio asset seekable/"replayable" rather than one opaque blob:
+    # each segment in timestamp_index is its own row once unnested.
+    segment_query = Query(
+        select=(FieldRef("d", ("title",)),),
+        source=TableRef("document", "d"),
+        where=Like(
+            Unnest(FieldRef("d", ("media", "audio")), ("transcript",)),
+            "%excessive force%",
+        ),
+        group_by=(),
+        limit=10,
+    )
+    typecheck(segment_query, DATAFORM_SCHEMA)
+    print("like on unnest(media.audio).transcript (nullable TextType, post-unnest) typechecks OK")
