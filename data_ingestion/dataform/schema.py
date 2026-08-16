@@ -264,7 +264,9 @@ FINANCIAL_DISCLOSURE: ObjectType = obj({
     **ENVELOPE_FIELDS,
     "person_id": TextType(),
     "year": OptionalType(IntType()),
-    "filepath": OptionalType(ImageType()),  # scanned PDF -> visual predicate
+    "filepath": OptionalType(TextType()),  # whole-document PDF link, matches Document.source_pdf_url's typing
+    "page_count": OptionalType(IntType()),
+    "media": MEDIA_BUNDLE,  # cover-page thumbnail as a real ImageAsset
     "is_amended": BoolType(),
     "investments": ArrayType(INVESTMENT),
     "gifts": ArrayType(GIFT),

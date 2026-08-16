@@ -367,7 +367,13 @@ class FinancialDisclosure(BaseModel):
     envelope: RecordEnvelope
     person_id: str
     year: Optional[int] = None
-    filepath: Optional[str] = None  # ImageAsset-like ref to the scanned PDF
+    filepath: Optional[str] = None  # full URL to the scanned PDF
+    page_count: Optional[int] = None
+    # cover-page thumbnail as a real ImageAsset -- CourtListener's bulk data
+    # only ever provides one thumbnail per disclosure (confirmed live
+    # 2026-08-16: thumbnail_2/_3/etc. all 404 even when page_count > 1), so
+    # this is genuinely one image, not a per-page gallery.
+    media: MediaBundle = Field(default_factory=MediaBundle)
     is_amended: bool = False
     investments: List[Investment] = Field(default_factory=list)
     gifts: List[Gift] = Field(default_factory=list)
