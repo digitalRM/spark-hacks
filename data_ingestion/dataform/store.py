@@ -77,6 +77,10 @@ class Store:
         row = self.conn.execute("SELECT value FROM checkpoints WHERE key = ?", (key,)).fetchone()
         return row["value"] if row else None
 
+    def get_checkpoint_records_done(self, key: str) -> int:
+        row = self.conn.execute("SELECT records_done FROM checkpoints WHERE key = ?", (key,)).fetchone()
+        return row["records_done"] if row else 0
+
     def set_checkpoint(self, key: str, value: Optional[str], records_done_delta: int = 0) -> None:
         import datetime
 

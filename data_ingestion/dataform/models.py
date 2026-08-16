@@ -123,12 +123,29 @@ class TextAsset(BaseModel):
     language: str = "en"
 
 
+class MediaLocation(BaseModel):
+    """Physical location tied to a media asset -- e.g. the courthouse an Oyez
+    oral argument's underlying case originated in. latitude/longitude are
+    populated only when the source provides real coordinates (confirmed live
+    2026-08-16: Oyez's case['location'] carries them for roughly a third of
+    sampled cases -- the originating circuit/district court's address, not
+    the Supreme Court building itself); name/city/region alone otherwise,
+    rather than inventing coordinates the source didn't give us."""
+    name: Optional[str] = None
+    city: Optional[str] = None
+    region: Optional[str] = None  # state/province
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+
+
 class ImageAsset(BaseModel):
     """One scanned page or exhibit. Predicate kinds: VISUAL."""
     page_number: Optional[int] = None
     image_ref: str  # URL or blob store key
     ocr_text: Optional[str] = None
     caption: Optional[str] = None
+    captured_at: Optional[datetime] = None  # when the page was scanned/captured, if known
+    location: Optional[MediaLocation] = None
 
 
 class AudioAsset(BaseModel):
@@ -138,6 +155,8 @@ class AudioAsset(BaseModel):
     duration_seconds: Optional[float] = None
     # list of {start_seconds, end_seconds, speaker, text} — populated by ASR
     timestamp_index: List[Dict] = Field(default_factory=list)
+    captured_at: Optional[datetime] = None  # when the recording was made
+    location: Optional[MediaLocation] = None
 
 
 class MediaBundle(BaseModel):
