@@ -258,7 +258,7 @@ export default function Home() {
                     {JSON.stringify(ast, null, 2)}
                   </pre>
                 ) : view === "bql" ? (
-                  <pre className="overflow-x-auto whitespace-pre-wrap rounded-xl bg-neutral-950 p-4 font-mono text-[13px] leading-relaxed text-neutral-100">
+                  <pre className="overflow-x-auto whitespace-pre-wrap rounded-xl border border-neutral-200 bg-white p-4 font-mono text-[13px] leading-relaxed text-neutral-800">
                     {bql}
                   </pre>
                 ) : (
