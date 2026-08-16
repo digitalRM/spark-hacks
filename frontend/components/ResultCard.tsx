@@ -22,7 +22,7 @@ export default function ResultCard({
 
   return (
     <article className="rounded-2xl bg-white">
-      <header className="flex items-start gap-3 mb-3 mt-3">
+      <header className="flex items-start gap-3 mb-3">
         <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-neutral-100 text-xs font-medium text-neutral-500">
           {index + 1}
         </span>
@@ -70,27 +70,32 @@ export default function ResultCard({
                     onClick={() => setOpen(active ? null : i)}
                     aria-expanded={active}
                     className={
-                      "flex items-center gap-2 rounded-lg border px-2.5 py-1.5 text-left text-xs transition-colors " +
+                      "flex items-center gap-2 rounded-[12px] border px-2.5 py-1.5 text-left text-xs transition-colors group " +
                       (active
                         ? "border-neutral-900 bg-neutral-900 text-white"
                         : "border-neutral-200 bg-white text-neutral-700 hover:border-neutral-400")
                     }
                   >
-                    <KindIcon
-                      kind={kind}
-                      className={active ? "text-white" : "text-neutral-500"}
-                    />
-                    <span className="max-w-[220px] truncate font-medium">
+                    <div className="-ml-0.5">
+                      <KindIcon
+                        kind={kind}
+                        className={active ? "text-white" : "text-neutral-500"}
+                      />
+                    </div>
+                    <span className=" truncate font-medium">
                       {fileTitle(f)}
                     </span>
-                    <span
-                      className={
-                        "rounded px-1 text-[10px] uppercase tracking-wide " +
-                        (active ? "bg-white/15" : "bg-neutral-100 text-neutral-500")
-                      }
-                    >
-                      {KIND_LABEL[kind]}
-                    </span>
+
+                    <div className={`border-l border-y rounded-r-none pl-3 rounded-[12px] border-neutral-200 -my-1.75 py-1.75 transition-colors ${active ? "border-neutral-900 bg-neutral-900 text-white group-hover:bg-neutral-900" : "border-neutral-200 bg-white text-neutral-700 group-hover:border-neutral-400"}`}>
+                      <span
+                        className={
+                          "rounded px-1 text-[10px] uppercase tracking-wide " +
+                          (active ? "bg-white/15" : "bg-neutral-100 text-neutral-500")
+                        }
+                      >
+                        {KIND_LABEL[kind]}
+                      </span>
+                    </div>
                   </button>
                 );
               })}

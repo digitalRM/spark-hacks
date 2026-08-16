@@ -268,7 +268,7 @@ export default function Home() {
                       {JSON.stringify(ast, null, 2)}
                     </pre>
                   ) : view === "bql" ? (
-                    <pre className="overflow-x-auto whitespace-pre-wrap rounded-xl border border-neutral-200 bg-white p-4 font-mono text-[13px] leading-relaxed text-neutral-800">
+                    <pre className="overflow-x-auto whitespace-pre-wrap rounded-xl bg-neutral-50 p-4 font-mono text-[13px] leading-relaxed text-neutral-800">
                       {bql}
                     </pre>
                   ) : (
@@ -288,9 +288,7 @@ export default function Home() {
             className="animate-fade-in max-w-4xl mx-auto w-full flex items-stretch -my-6"
           >
             <div className="flex-1 px-5 py-6">
-              {view === "query" && (
-                <SearchedAcross query={ast} done={resultPhase === "done"} />
-              )}
+              <SearchedAcross query={ast} done={resultPhase === "done"} />
             </div>
             <div className="relative w-[28%] min-h-[120px] mr-6">
               <FlowLines

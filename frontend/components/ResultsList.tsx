@@ -8,13 +8,7 @@ export default function ResultsList({ response }: { response: RunResponse }) {
 
   return (
     <div className="flex flex-col gap-3 p-4">
-      <p className="text-xs text-neutral-500">
-        <span className="font-medium text-neutral-700">
-          {n} {n === 1 ? "case" : "cases"}
-        </span>
-        {results.length < n && ` · showing ${results.length}`}
-        {tookMs != null && ` · ${(tookMs / 1000).toFixed(1)}s`}
-      </p>
+
       {results.length === 0 ? (
         <p className="rounded-xl border border-neutral-200 py-10 text-center text-sm text-neutral-400">
           No cases matched. Try loosening a condition.
@@ -23,7 +17,10 @@ export default function ResultsList({ response }: { response: RunResponse }) {
         results.map((r, i) => (
           <div
             key={r.id}
-            className="animate-pop-in"
+            className={
+              "animate-pop-in" +
+              (i > 0 ? " mt-2 border-t border-dashed border-neutral-200 pt-5" : "")
+            }
             style={{ animationDelay: `${i * 90}ms` }}
           >
             <ResultCard result={r} index={i} />

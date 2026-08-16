@@ -1,11 +1,14 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { fileTitle, type ResultFile } from "@/lib/results";
 
 /**
  * Inline image with a click-to-enlarge lightbox. Plain <img> (not next/image)
- * so any DGX-hosted URL works without remotePatterns config.
+ * so any DGX-hosted URL works without remotePatterns config. The lightbox is
+ * portaled to <body> so `position: fixed` isn't trapped by transformed/animated
+ * ancestors (AutoHeight, fade-in) and it truly covers the viewport.
  */
 export default function ImageViewer({ file }: { file: ResultFile }) {
   const [open, setOpen] = useState(false);
@@ -53,31 +56,34 @@ export default function ImageViewer({ file }: { file: ResultFile }) {
         <p className="mt-2 text-xs text-neutral-500">Record page {file.page}</p>
       )}
 
-      {open && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          aria-label={title}
-          onClick={() => setOpen(false)}
-          className="animate-fade-in fixed inset-0 z-[300] flex items-center justify-center bg-neutral-900/70 p-6 backdrop-blur-sm"
-        >
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={file.url}
-            alt={title}
-            className="max-h-full max-w-full rounded-lg shadow-2xl"
-            onClick={(e) => e.stopPropagation()}
-          />
-          <button
-            type="button"
+      {open &&
+        typeof document !== "undefined" &&
+        createPortal(
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label={title}
             onClick={() => setOpen(false)}
-            aria-label="Close"
-            className="absolute right-4 top-4 flex h-9 w-9 items-center justify-center rounded-full bg-white/90 text-neutral-700 hover:bg-white"
+            className="animate-fade-in fixed inset-0 z-[300] flex items-center justify-center bg-neutral-900/70 p-6 backdrop-blur-sm"
           >
-            ✕
-          </button>
-        </div>
-      )}
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={file.url}
+              alt={title}
+              className="max-h-full max-w-full rounded-lg shadow-2xl"
+              onClick={(e) => e.stopPropagation()}
+            />
+            <button
+              type="button"
+              onClick={() => setOpen(false)}
+              aria-label="Close"
+              className="absolute right-4 top-4 flex h-9 w-9 items-center justify-center rounded-full bg-white/90 text-neutral-700 hover:bg-white"
+            >
+              ✕
+            </button>
+          </div>,
+          document.body,
+        )}
     </>
   );
 }
