@@ -1,6 +1,6 @@
 """HTTP in front of api.driver.
 
-    .venv/bin/python -m api.server            # 127.0.0.1:8000
+    .venv/bin/python -m api.server            # 0.0.0.0:8000
 
     POST /compile   {"question": "...", "schema": "courtlistener"}  -> envelope
     POST /check     {"query": {...}}                                -> validation only
@@ -94,7 +94,7 @@ def health() -> dict[str, Any]:
 
 def serve() -> None:
     import uvicorn
-    uvicorn.run(app, host=os.environ.get('AMICUS_HOST', '127.0.0.1'),
+    uvicorn.run(app, host=os.environ.get('AMICUS_HOST', '0.0.0.0'),
                 port=int(os.environ.get('AMICUS_PORT', '8000')))
 
 if __name__ == '__main__':

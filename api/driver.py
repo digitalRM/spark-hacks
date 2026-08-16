@@ -91,7 +91,7 @@ def seam(module_name: str, *names: str) -> tuple[Any, ...] | None:
     found = tuple(getattr(module, n, None) for n in names)
     return found if all(f is not None for f in found) else None
 
-def seam_status(module_name: str, *names: str) -> Status:
+def seam_status(module_name: str, *names: str) -> Literal['live', 'stub']:
     """Whether a seam is really implemented, for reporting rather than dispatch.
 
     A stub module exists and exports the right names -- presence proves nothing. A module
@@ -101,7 +101,7 @@ def seam_status(module_name: str, *names: str) -> Status:
     try: module = import_module(module_name)
     except ModuleNotFoundError: return 'stub'
     if getattr(module, 'STUB', False): return 'stub'
-    return 'ok' if all(getattr(module, n, None) is not None for n in names) else 'stub'
+    return 'live' if all(getattr(module, n, None) is not None for n in names) else 'stub'
 
 # --------------------------------------------------------------------------- #
 # Stages
