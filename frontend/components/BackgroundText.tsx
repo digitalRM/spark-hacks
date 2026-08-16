@@ -123,9 +123,11 @@ export default function BackgroundText({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   // read in the frame loop via ref so switching zones doesnt restart the effect (would drop the trail)
   const roamRef = useRef(roam);
+  const roamRadiusRef = useRef(roamRadius);
   useEffect(() => {
     roamRef.current = roam;
-  }, [roam]);
+    roamRadiusRef.current = roamRadius;
+  }, [roam, roamRadius]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -308,9 +310,12 @@ export default function BackgroundText({
       { x: -1, y: -1, fx: 0.031, fy: 0.047, px: 0.0, py: 1.7 },
       { x: -1, y: -1, fx: 0.027, fy: 0.041, px: 2.4, py: 0.6 },
     ];
+    let curRadius = roamRadiusRef.current;
     const updateRoamers = (t: number, dt: number) => {
       const mode = roamRef.current;
       if (!mode) return;
+      // ease the reveal size toward its target so growth/shrink is a swell, not a flash
+      curRadius += (roamRadiusRef.current - curRadius) * (1 - Math.pow(0.001, dt / 2.5));
       const zones = ZONES[mode];
       const ease = 1 - Math.pow(0.001, dt / 4); // ~4s to close 99.9% of the gap
       for (let i = 0; i < roamers.length; i++) {
@@ -328,7 +333,7 @@ export default function BackgroundText({
           R.y += (ty - R.y) * ease;
         }
         // larger but fainter than the cursor, "just a little bit"
-        stamp(R.x, R.y, 0.6, roamRadius);
+        stamp(R.x, R.y, 0.6, curRadius);
       }
     };
 
@@ -462,7 +467,7 @@ export default function BackgroundText({
       document.removeEventListener("pointerleave", onLeave);
       window.removeEventListener("blur", onLeave);
     };
-  }, [strength, hoverRadius, trail, roamRadius, clearSelector, margin, feather, areaSelector, lineMargin, lineFeather]);
+  }, [strength, hoverRadius, trail, clearSelector, margin, feather, areaSelector, lineMargin, lineFeather]);
 
   return (
     <canvas

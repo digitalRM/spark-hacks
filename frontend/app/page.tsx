@@ -8,6 +8,7 @@ import BackgroundLines from "@/components/BackgroundLines";
 import BackgroundText from "@/components/BackgroundText";
 import FlowLines from "@/components/FlowLines";
 import TextShader from "@/components/TextShader";
+import CompileShader from "@/components/CompileShader";
 import ThinkingLabel from "@/components/ThinkingLabel";
 import AutoHeight from "@/components/AutoHeight";
 import { EXAMPLE_QUERIES, type JsonValue } from "@/lib/dummyBql";
@@ -26,6 +27,13 @@ function runDurationMs() {
   if (typeof window === "undefined") return 10_000;
   const v = Number(new URLSearchParams(window.location.search).get("run"));
   return Number.isFinite(v) && v > 0 ? v : 10_000;
+}
+
+/** optional artificial compile delay in ms (`?compile=3000`) so the compiling state can be inspected while developing */
+function compileDelayMs() {
+  if (typeof window === "undefined") return 0;
+  const v = Number(new URLSearchParams(window.location.search).get("compile"));
+  return Number.isFinite(v) && v > 0 ? v : 0;
 }
 
 type View = "query" | "tree" | "json" | "bql";
@@ -101,6 +109,8 @@ export default function Home() {
     setResults(null);
     setRunError(null);
     try {
+      const delay = compileDelayMs();
+      if (delay) await new Promise((r) => window.setTimeout(r, delay));
       const result = await compileQuery(text);
       if (result.mode === "answer") {
         setAnswer(result.answer);
@@ -133,7 +143,12 @@ export default function Home() {
     <main className="flex flex-1 flex-col px-4 py-8">
       {/* lines flowing into the input from the left and out the right; gone on submit */}
       {/* faint legal-text texture behind everything */}
-      <BackgroundText roam={submitted ? "sides" : "landing"} />
+      <BackgroundText
+        roam={submitted ? "sides" : "landing"}
+        // while the query is compiling the roamers balloon to surface most of the
+        // page's text, then shrink back once the Compiled Search is ready
+        roamRadius={compiling ? 1700 : 340}
+      />
       <BackgroundLines active={!submitted} targetRef={inputRef} />
 
       {/* pinned title: sits exactly where the in-flow title landed after the shrink,
@@ -256,9 +271,19 @@ export default function Home() {
                   {answer}
                 </p>
               ) : !ast ? (
-                <p className="rounded-xl border border-neutral-200 py-8 text-center text-sm text-neutral-400 -m-1.5 -mt-3">
-                  Compiling your query…
-                </p>
+                // empty state: legal text being "parsed" by a read-head, greys only
+                // so it doesn't read as the thinking / results field
+                // (AssembleShader = the alternative "pulled together" version)
+                <div className="relative h-[240px] overflow-hidden rounded-xl border border-neutral-200 -m-1.5 -mt-3">
+                  <CompileShader
+                    active
+                    hole={{ rx: 130, ry: 28, feather: 48 }}
+                    className="absolute inset-0"
+                  />
+                  <p className="pointer-events-none absolute inset-0 flex items-center justify-center text-sm text-neutral-400">
+                    Compiling your query…
+                  </p>
+                </div>
               ) : (
                 <div key="ready" className="animate-fade-in">
                   {view === "query" ? (

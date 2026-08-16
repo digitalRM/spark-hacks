@@ -2,13 +2,20 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "frontend",
-      "runtimeExecutable": "npm",
+      "name": "api",
+      "runtimeExecutable": "bash",
       "runtimeArgs": [
-        "--prefix",
-        "frontend",
-        "run",
-        "dev"
+        "-c",
+        "set -a; [ -f .env.local ] && . ./.env.local; [ -f frontend/.env.local ] && . ./frontend/.env.local; set +a; export AMICUS_PORT=${AMICUS_PORT:-8010}; exec .venv/bin/python -m api.server"
+      ],
+      "port": 8010
+    },
+    {
+      "name": "frontend",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": [
+        "-c",
+        "export NEXT_PUBLIC_AMICUS_API_URL=${NEXT_PUBLIC_AMICUS_API_URL:-http://127.0.0.1:8010}; exec npm --prefix frontend run dev"
       ],
       "port": 3000,
       "autoPort": true
