@@ -275,7 +275,8 @@ export default function BackgroundLines({
                   // so ride those backwards to also travel into the box
                   keyPoints={c.side === "l" ? "0;1" : "1;0"}
                   keyTimes="0;1"
-                  keySplines="0.35 0 0.65 1"
+                  // hard ease-in: linger near the edge, then rush into the box
+                  keySplines="0.7 0 0.84 0"
                 >
                   <mpath href={`#bg-line-${c.side}-${c.line}`} />
                 </animateMotion>
@@ -283,7 +284,7 @@ export default function BackgroundLines({
                 <animate
                   attributeName="opacity"
                   values="0;1;1;0"
-                  keyTimes="0;0.12;0.86;1"
+                  keyTimes="0;0.12;0.97;1"
                   dur={`${dur}s`}
                   begin={`${begin}s`}
                   repeatCount="indefinite"

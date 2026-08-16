@@ -30,6 +30,10 @@ export const TABLE_LABELS: Record<string, string> = {
   financial_disclosure: "Financial disclosures",
 };
 
+/**
+ * Labels keyed by full `alias.path` first, then by alias-free path, so the
+ * model's alias choice (`doc`, `d`, `document`, ...) never changes the wording.
+ */
 const FIELD_LABELS: Record<string, string> = {
   "docket.court_id": "Court",
   "citation.cited_cite": "Cites",
@@ -45,12 +49,59 @@ const FIELD_LABELS: Record<string, string> = {
   "docket.date_terminated": "Date terminated",
   "opinion.author": "Author",
   "opinion.type": "Opinion type",
-  "doc.envelope.id": "Document ID",
-  "doc.envelope.source_system": "Source system",
-  "doc.title": "Title",
-  "doc.media.text.plain_text": "Document text",
-  "doc.media.images": "Document images",
-  "doc.media.audio": "Document audio",
+};
+
+const PATH_LABELS: Record<string, string> = {
+  // dataform envelope
+  "envelope.id": "Document ID",
+  "envelope.source_system": "Source system",
+  "envelope.external_ids": "External IDs",
+  // dataform document
+  doc_type: "Document type",
+  title: "Title",
+  citation: "Citation",
+  jurisdiction: "Jurisdiction",
+  issuing_body_id: "Issuing body",
+  date_issued: "Date issued",
+  status: "Status",
+  summary: "Summary",
+  "media.text.plain_text": "Document text",
+  "media.images": "Document images",
+  "media.audio": "Document audio",
+  source_pdf_url: "Source PDF",
+  hierarchy_path: "Hierarchy path",
+  proceeding_id: "Proceeding",
+  cites: "Cites",
+  // organization / person / position
+  org_type: "Organization type",
+  short_name: "Short name",
+  parent_org_id: "Parent organization",
+  role_types: "Role",
+  name_first: "First name",
+  name_last: "Last name",
+  political_affiliations: "Political affiliation",
+  photo_ref: "Photo",
+  person_id: "Person",
+  organization_id: "Organization",
+  date_start: "Start date",
+  date_end: "End date",
+  // proceeding / citation / event
+  proceeding_type: "Proceeding type",
+  number: "Number",
+  party_ids: "Parties",
+  date_filed: "Date filed",
+  document_ids: "Documents",
+  citing_document_id: "Citing document",
+  cited_document_id: "Cited document",
+  citation_string: "Citation",
+  treatment: "Treatment",
+  event_type: "Event type",
+  date: "Date",
+  description: "Description",
+  outcome: "Outcome",
+  year: "Year",
+  filepath: "File",
+  disposition: "Disposition",
 };
 
 const FIELD_VERBS: Record<string, string> = {
@@ -58,13 +109,47 @@ const FIELD_VERBS: Record<string, string> = {
   "cluster.scan_pages": "contains",
   "docket.argument": "includes",
   "docket.argument_transcript": "includes",
-  "doc.media.text.plain_text": "discusses",
-  "doc.media.images": "contains",
-  "doc.media.audio": "includes",
+  "media.text.plain_text": "discusses",
+  "media.images": "contains",
+  "media.audio": "includes",
+  summary: "discusses",
+  description: "discusses",
 };
 
 const EQUALS_CONNECTORS: Record<string, string> = {
   "citation.cited_cite": "",
+};
+
+/** `doc.envelope.source_system` -> `envelope.source_system` */
+function pathOf(key: string) {
+  const dot = key.indexOf(".");
+  return dot === -1 ? key : key.slice(dot + 1);
+}
+
+function lastSegment(key: string) {
+  return key.split(".").pop() ?? key;
+}
+
+/** `date_issued` -> `Date issued` */
+function sentenceCase(text: string) {
+  const words = text.replace(/_/g, " ").trim();
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
+const SOURCE_NAMES: Record<string, string> = {
+  courtlistener: "CourtListener",
+  ecfr: "eCFR",
+  govinfo: "GovInfo",
+  congress: "Congress.gov",
+  oyez: "Oyez",
+};
+
+/** Enum-ish tokens whose canonical form has its own casing. */
+const TOKEN_NAMES: Record<string, string> = {
+  cfr_section: "CFR section",
+  regulation_docket: "Regulation docket",
+  party_entity: "Party entity",
+  federal: "Federal",
 };
 
 const COURT_NAMES: Record<string, string> = {
@@ -91,8 +176,25 @@ const KNOWN_CITATIONS: Record<string, string> = {
 };
 
 export function fieldLabel(key: string) {
-  return FIELD_LABELS[key] ?? key.split(".").pop()?.replace(/_/g, " ") ?? key;
+  return (
+    FIELD_LABELS[key] ??
+    PATH_LABELS[pathOf(key)] ??
+    PATH_LABELS[lastSegment(key)] ??
+    sentenceCase(lastSegment(key))
+  );
 }
+
+function fieldVerb(key: string) {
+  return FIELD_VERBS[key] ?? FIELD_VERBS[pathOf(key)] ?? FIELD_VERBS[lastSegment(key)] ?? "mentions";
+}
+
+function isCourtField(key: string) {
+  const leaf = lastSegment(key);
+  return leaf === "court_id" || leaf === "jurisdiction";
+}
+
+/** Lowercase snake_case identifiers (`oral_argument`, `ca2`, `opinion`) — never prose. */
+const ENUM_TOKEN = /^[a-z][a-z0-9_]*$/;
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 const MONTHS = "Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec".split(" ");
@@ -113,12 +215,19 @@ function formatDate(iso: string) {
 export function humanizeValue(key: string, value: Literal): string {
   if (typeof value === "boolean") return value ? "yes" : "no";
   if (typeof value === "number") return String(value);
-  if (key === "docket.court_id") return COURT_NAMES[value] ?? value.toUpperCase();
+  const leaf = lastSegment(key);
+  if (isCourtField(key)) {
+    return COURT_NAMES[value] ?? TOKEN_NAMES[value] ?? value.toUpperCase();
+  }
+  if (leaf === "source_system") return SOURCE_NAMES[value] ?? sentenceCase(value);
   if (key === "citation.cited_cite") {
     const name = KNOWN_CITATIONS[value];
     return name ? `${name}, ${value}` : value;
   }
   if (isDateValue(value)) return formatDate(value);
+  // ids, urls, and free text pass through untouched; bare enum tokens get prose casing
+  if (/(^|_)(id|ids|url|path|ref)$/.test(leaf)) return value;
+  if (ENUM_TOKEN.test(value)) return TOKEN_NAMES[value] ?? sentenceCase(value);
   return value;
 }
 
@@ -209,7 +318,7 @@ function describeComparison(comparison: Comparison): Criterion {
   };
 }
 
-function joinList(items: string[], conjunction: "or" | "and") {
+export function joinList(items: string[], conjunction: "or" | "and") {
   if (items.length <= 1) return items.join("");
   if (items.length === 2) return `${items[0]} ${conjunction} ${items[1]}`;
   return `${items.slice(0, -1).join(", ")}, ${conjunction} ${items.at(-1)}`;
@@ -269,7 +378,7 @@ export function describeCondition(condition: Condition): Criterion {
     case "Fuzzy": {
       const ref = fieldRefFor(condition.field);
       const key = ref ? fieldKey(ref) : "content";
-      const verb = FIELD_VERBS[key] ?? "mentions";
+      const verb = fieldVerb(key);
       const lead = new RegExp(`^${verb}\\s+`, "i");
       const value = lead.test(condition.text) ? condition.text.replace(lead, "") : condition.text;
       return {
@@ -309,6 +418,11 @@ export function tablesUsed(query: BqlQuery) {
 
 export function selectedLabels(query: BqlQuery): string[] {
   return query.select.map(humanizeExpression);
+}
+
+/** "Document ID" -> "document ID": lowercase only the lead so acronyms survive mid-sentence. */
+export function inSentence(label: string) {
+  return label.charAt(0).toLowerCase() + label.slice(1);
 }
 
 export function resultNoun(query: BqlQuery): string {

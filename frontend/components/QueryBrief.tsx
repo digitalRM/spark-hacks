@@ -2,6 +2,8 @@ import type { ReactNode } from "react";
 import type { BqlQuery } from "@/lib/bql";
 import {
   TABLE_LABELS,
+  inSentence,
+  joinList,
   resultNoun,
   selectedLabels,
   tablesUsed,
@@ -154,7 +156,7 @@ export default function QueryBrief({ query }: { query: BqlQuery }) {
             <>
               , showing{" "}
               <span className="text-neutral-600">
-                {columns.join(" and ").toLowerCase()}
+                {joinList(columns.map(inSentence), "and")}
               </span>
             </>
           )}

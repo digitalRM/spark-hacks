@@ -15,6 +15,8 @@ type Props = {
    * "landing" = top+bottom bands, "sides" = left/right margins, `null` = off
    */
   roam?: "landing" | "sides" | null;
+  /** Half-width (px) of each roamer's reveal (same ellipse shape as the cursor's). */
+  roamRadius?: number;
   /** elements matching this get cleared out of the texture (`margin` px gap + `feather` px soft edge) */
   clearSelector?: string;
   margin?: number;
@@ -109,6 +111,7 @@ export default function BackgroundText({
   hoverRadius = 190,
   trail = 1.6,
   roam = null,
+  roamRadius = 340,
   clearSelector = "[data-bg-clear]",
   margin = 28,
   feather = 44,
@@ -324,8 +327,8 @@ export default function BackgroundText({
           R.x += (tx - R.x) * ease;
           R.y += (ty - R.y) * ease;
         }
-        // fainter and a touch smaller than the cursor, "just a little bit"
-        stamp(R.x, R.y, 0.6, hoverRadius * 0.85);
+        // larger but fainter than the cursor, "just a little bit"
+        stamp(R.x, R.y, 0.6, roamRadius);
       }
     };
 
@@ -459,7 +462,7 @@ export default function BackgroundText({
       document.removeEventListener("pointerleave", onLeave);
       window.removeEventListener("blur", onLeave);
     };
-  }, [strength, hoverRadius, trail, clearSelector, margin, feather, areaSelector, lineMargin, lineFeather]);
+  }, [strength, hoverRadius, trail, roamRadius, clearSelector, margin, feather, areaSelector, lineMargin, lineFeather]);
 
   return (
     <canvas

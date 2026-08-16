@@ -42,10 +42,6 @@ export default function Home() {
   const [compiling, setCompiling] = useState(false);
   const [ast, setAst] = useState<BqlQuery | null>(null);
   const [bql, setBql] = useState("");
-  const [compilerMeta, setCompilerMeta] = useState<{
-    schema: string;
-    version: string;
-  } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [view, setView] = useState<View>("query");
   // result phase: once we have a plan it "runs" for a bit, then shows a result
@@ -98,7 +94,6 @@ export default function Home() {
     setCompiling(true);
     setAst(null);
     setBql("");
-    setCompilerMeta(null);
     setError(null);
     setResultPhase("idle");
     setResults(null);
@@ -107,7 +102,6 @@ export default function Home() {
       const result = await compileQuery(text);
       setAst(result.query);
       setBql(result.bql);
-      setCompilerMeta({ schema: result.schema, version: result.bql_version });
       setResultPhase("running");
       setRun((r) => r + 1);
     } catch (e) {
@@ -257,11 +251,6 @@ export default function Home() {
               </p>
             ) : (
               <div key="ready" className="animate-fade-in">
-                {compilerMeta && (
-                  <p className="mb-3 text-[11px] text-neutral-400">
-                    natural language → JSON → BQL · schema {compilerMeta.schema} · AST v{compilerMeta.version}
-                  </p>
-                )}
                 {view === "query" ? (
                   <QueryBrief query={ast} />
                 ) : view === "json" ? (
