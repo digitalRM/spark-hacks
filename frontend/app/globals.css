@@ -8,19 +8,157 @@
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --font-sans: var(--font-inter);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+html {
+  color-scheme: light;
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-inter), system-ui, sans-serif;
+}
+
+/* Results panel entrance */
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.animate-rise-in {
+  animation: rise-in 0.45s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* Top-down query-plan tree connectors */
+.plan-root,
+.plan-children {
+  --line: #d4d4d4;
+  --drop: 1.25rem; /* vertical run between a parent and its children row */
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  width: max-content;
+  min-width: 100%;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.plan-children {
+  position: relative;
+  padding-top: var(--drop);
+  min-width: 0;
+}
+/* stem from the parent card down to the children rail */
+.plan-children::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 50%;
+  height: var(--drop);
+  border-left: 1.5px solid var(--line);
+}
+.plan-node {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: var(--drop) 0.5rem 0;
+}
+/* horizontal rail halves + drop into each child */
+.plan-node::before,
+.plan-node::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  width: 50%;
+  height: var(--drop);
+  border-top: 1.5px solid var(--line);
+}
+.plan-node::before {
+  right: 50%;
+}
+.plan-node::after {
+  left: 50%;
+  border-left: 1.5px solid var(--line);
+}
+.plan-node:first-child::before,
+.plan-node:last-child::after {
+  border-top: none;
+}
+.plan-node:last-child::after {
+  border-left: 1.5px solid var(--line);
+}
+.plan-node:only-child::before {
+  display: none;
+}
+.plan-node:only-child::after {
+  border-top: none;
+}
+/* the root has no rail above it */
+.plan-root > .plan-node {
+  padding-top: 0;
+}
+.plan-root > .plan-node::before,
+.plan-root > .plan-node::after {
+  display: none;
+}
+
+/* Left-to-right JSON tree connectors */
+.tree-children {
+  --line: #d4d4d4;
+  --gap: 1.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-left: var(--gap);
+  padding-left: var(--gap);
+  position: relative;
+}
+.tree-child {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+/* horizontal stub from the vertical spine to the node */
+.tree-child::before {
+  content: "";
+  position: absolute;
+  left: calc(-1 * var(--gap));
+  top: 50%;
+  width: var(--gap);
+  border-top: 1.5px solid var(--line);
+}
+/* vertical spine segment */
+.tree-child::after {
+  content: "";
+  position: absolute;
+  left: calc(-1 * var(--gap));
+  top: 0;
+  bottom: 0;
+  border-left: 1.5px solid var(--line);
+}
+.tree-child:first-child::after {
+  top: 50%;
+}
+.tree-child:last-child::after {
+  bottom: 50%;
+}
+.tree-child:only-child::after {
+  display: none;
+}
+/* stub from parent node into the spine */
+.tree-children::before {
+  content: "";
+  position: absolute;
+  left: calc(-1 * var(--gap));
+  top: 50%;
+  width: var(--gap);
+  border-top: 1.5px solid var(--line);
 }
