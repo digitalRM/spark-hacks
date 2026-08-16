@@ -277,7 +277,10 @@ def grain(n: PlanNode) -> Grain:
         case Scan(scan_grain=g):              return g
         case Collapse(collapse_grain=g):      return g
         case Aggregate(agg_grain=g):          return g
-        case Expand(field=f, child=c):        return (*grain(c), f.path[-1] if f.path else f.source)
+        # The qualified name, not just the last component: cluster.scan_pages and
+        # docket.scan_pages are different grains, and a bare 'scan_pages' would conflate
+        # them the moment a query expands both.
+        case Expand(field=f, child=c):        return (*grain(c), '.'.join((f.source, *f.path)))
         case Union(children=cs):              return grain(cs[0]) if cs else ()
         case SemanticJoin(left=l, right=r):   return (*grain(l), *grain(r))
         case _:                               return grain(n.child)

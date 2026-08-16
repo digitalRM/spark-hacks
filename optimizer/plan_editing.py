@@ -208,7 +208,27 @@ def validate(
 
             case _: pass
 
-    return out
+    return _dedupe(out, root)
+
+def _dedupe(violations: list[Violation], root: PlanNode) -> list[Violation]:
+    """Collapse violations that share a cause.
+
+    One missing Materialize is consumed by every operator above it — the Expand and the
+    filter both report truthfully, but the UI would light up two cards for one omission.
+    Keep the deepest reporter, which is the one nearest the node that should have been
+    there."""
+    depth = {n.node_id: i for i, n in enumerate(walk(root))}   # parents first
+    best: dict[tuple[str, str], Violation] = {}
+    order: list[Violation] = []
+    for v in violations:
+        if v.rule != 'unmaterialized_field':
+            order.append(v)
+            continue
+        key = (v.rule, v.message)
+        prev = best.get(key)
+        if prev is None or depth.get(v.node_id, 0) > depth.get(prev.node_id, 0):
+            best[key] = v
+    return [*order, *best.values()]
 
 # ---------------------------------------------------------------------------
 # Text
