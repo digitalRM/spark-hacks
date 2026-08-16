@@ -36,7 +36,10 @@ export default function AutoHeight({
         transition: `height ${durationMs}ms cubic-bezier(0.22, 1, 0.36, 1)`,
       }}
     >
-      <div ref={innerRef}>{children}</div>
+      {/* flow-root keeps children's margins inside the measured box */}
+      <div ref={innerRef} className="flow-root">
+        {children}
+      </div>
     </div>
   );
 }

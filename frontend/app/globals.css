@@ -145,3 +145,50 @@ body {
   width: var(--gap);
   border-top: 1.5px solid var(--line);
 }
+
+/* audio scrubber: thin track w/ played portion tinted, round thumb */
+.audio-range {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 20px;
+  background: transparent;
+  cursor: pointer;
+}
+.audio-range::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 9999px;
+  background: linear-gradient(
+    to right,
+    #171717 0,
+    #171717 var(--pct, 0%),
+    #e5e5e5 var(--pct, 0%),
+    #e5e5e5 100%
+  );
+}
+.audio-range::-moz-range-track {
+  height: 4px;
+  border-radius: 9999px;
+  background: #e5e5e5;
+}
+.audio-range::-moz-range-progress {
+  height: 4px;
+  border-radius: 9999px;
+  background: #171717;
+}
+.audio-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  margin-top: -5px;
+  height: 14px;
+  width: 14px;
+  border-radius: 9999px;
+  background: #fff;
+  border: 1.5px solid #171717;
+}
+.audio-range::-moz-range-thumb {
+  height: 14px;
+  width: 14px;
+  border-radius: 9999px;
+  background: #fff;
+  border: 1.5px solid #171717;
+}

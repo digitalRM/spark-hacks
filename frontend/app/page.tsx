@@ -13,6 +13,9 @@ import AutoHeight from "@/components/AutoHeight";
 import { EXAMPLE_QUERIES, type JsonValue } from "@/lib/dummyBql";
 import type { BqlQuery } from "@/lib/bql";
 import { compileQuery } from "@/lib/compile";
+import { runQuery } from "@/lib/runQuery";
+import type { RunResponse } from "@/lib/results";
+import ResultsList from "@/components/ResultsList";
 import { useTypewriter } from "@/lib/useTypewriter";
 
 /** how long the circular reveal takes to clear the text shader */
@@ -49,21 +52,31 @@ export default function Home() {
   const [resultPhase, setResultPhase] = useState<
     "idle" | "running" | "revealing" | "done"
   >("idle");
-  // bumped per search so the timer re-arms even if the ast object is identical
+  const [results, setResults] = useState<RunResponse | null>(null);
+  const [runError, setRunError] = useState<string | null>(null);
+  // bumped per search so the run re-fires even if the ast object is identical
   const [run, setRun] = useState(0);
   useEffect(() => {
     if (!ast) return;
-    // TODO: swap fixed delay for the real runtime call
-    const runMs = runDurationMs();
-    const t1 = window.setTimeout(() => setResultPhase("revealing"), runMs);
-    // reveal wipe (REVEAL_MS) + a beat for "done!" to fade, then show result
-    const t2 = window.setTimeout(
-      () => setResultPhase("done"),
-      runMs + REVEAL_MS + 500,
-    );
+    const ctrl = new AbortController();
+    let t: number | undefined;
+    // real runtime if NEXT_PUBLIC_RUNTIME_URL is set; dummy results after the
+    // placeholder run time otherwise
+    runQuery(ast, { signal: ctrl.signal, fallbackMs: runDurationMs() })
+      .then((res) => {
+        setResults(res);
+        setResultPhase("revealing");
+        // reveal wipe (REVEAL_MS) + a beat for "done!" to fade, then show results
+        t = window.setTimeout(() => setResultPhase("done"), REVEAL_MS + 500);
+      })
+      .catch((e) => {
+        if (e?.name === "AbortError") return;
+        setRunError(e instanceof Error ? e.message : "The search failed.");
+        setResultPhase("done");
+      });
     return () => {
-      window.clearTimeout(t1);
-      window.clearTimeout(t2);
+      ctrl.abort();
+      window.clearTimeout(t);
     };
   }, [ast, run]);
   // once the title finishes shrinking into the header, pin a fixed copy
@@ -88,6 +101,8 @@ export default function Home() {
     setCompilerMeta(null);
     setError(null);
     setResultPhase("idle");
+    setResults(null);
+    setRunError(null);
     try {
       const result = await compileQuery(text);
       setAst(result.query);
@@ -310,11 +325,15 @@ export default function Home() {
                     <ThinkingLabel done={resultPhase === "revealing"} />
                   </p>
                 </div>
-              ) : (
-                <p className="animate-fade-in p-4 text-[15px] leading-relaxed">
-                  result
+              ) : runError ? (
+                <p className="animate-fade-in p-4 text-center text-sm text-rose-600">
+                  {runError}
                 </p>
-              )}
+              ) : results ? (
+                <div className="animate-fade-in">
+                  <ResultsList response={results} />
+                </div>
+              ) : null}
             </AutoHeight>
           </section>
         )}
