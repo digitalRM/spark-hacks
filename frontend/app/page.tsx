@@ -22,13 +22,6 @@ import { useTypewriter } from "@/lib/useTypewriter";
 /** how long the circular reveal takes to clear the text shader */
 const REVEAL_MS = 1100;
 
-/** fake "run" time in ms; override w/ `?run=3000` while developing */
-function runDurationMs() {
-  if (typeof window === "undefined") return 10_000;
-  const v = Number(new URLSearchParams(window.location.search).get("run"));
-  return Number.isFinite(v) && v > 0 ? v : 10_000;
-}
-
 /** optional artificial compile delay in ms (`?compile=3000`) so the compiling state can be inspected while developing */
 function compileDelayMs() {
   if (typeof window === "undefined") return 0;
@@ -59,15 +52,16 @@ export default function Home() {
   >("idle");
   const [results, setResults] = useState<RunResponse | null>(null);
   const [runError, setRunError] = useState<string | null>(null);
-  // bumped per search so the run re-fires even if the ast object is identical
+  // the optimized ExecutionPlan from /compile; POSTed to /execute to get results
+  const [plan, setPlan] = useState<Record<string, unknown> | null>(null);
+  // bumped per search so the run re-fires even if the plan object is identical
   const [run, setRun] = useState(0);
   useEffect(() => {
-    if (!ast) return;
+    if (!plan) return;
     const ctrl = new AbortController();
     let t: number | undefined;
-    // real runtime if NEXT_PUBLIC_AMICUS_RUNTIME_URL is set; dummy results after the
-    // placeholder run time otherwise
-    runQuery(ast, { signal: ctrl.signal, fallbackMs: runDurationMs() })
+    // the slow part: one model call per record, on the DGX
+    runQuery(plan, { signal: ctrl.signal })
       .then((res) => {
         setResults(res);
         setResultPhase("revealing");
@@ -83,7 +77,7 @@ export default function Home() {
       ctrl.abort();
       window.clearTimeout(t);
     };
-  }, [ast, run]);
+  }, [plan, run]);
   // once the title finishes shrinking into the header, pin a fixed copy
   // so it stays put while results scroll underneath
   const [pinned, setPinned] = useState(false);
@@ -108,18 +102,29 @@ export default function Home() {
     setResultPhase("idle");
     setResults(null);
     setRunError(null);
+    setPlan(null);
     try {
       const delay = compileDelayMs();
       if (delay) await new Promise((r) => window.setTimeout(r, delay));
-      const result = await compileQuery(text);
+      // execute: false → the API stops after optimize and hands back the plan; we
+      // show the compiled query and then run the plan via /execute below.
+      const result = await compileQuery(text, { execute: false });
       if (result.mode === "answer") {
         setAnswer(result.answer);
         return;
       }
       setAst(result.query);
       setBql(result.bql);
-      setResultPhase("running");
-      setRun((r) => r + 1);
+      if (result.plan) {
+        setPlan(result.plan);
+        setResultPhase("running");
+        setRun((r) => r + 1);
+      } else {
+        // compiled but couldn't be planned (typecheck/optimize failed): surface why
+        const failed = result.stages.find((s) => s.status === "failed");
+        setRunError(failed?.message ?? "The query compiled but couldn't be planned.");
+        setResultPhase("done");
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Couldn't compile that query.");
     } finally {

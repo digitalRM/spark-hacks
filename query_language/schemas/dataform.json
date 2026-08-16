@@ -13,96 +13,438 @@
     "criminalrecord": "envelope.id"
   },
   "fields": [
-    {"name": "organization.envelope.id", "type": "SCALAR", "description": "Canonical organization UUID."},
-    {"name": "organization.envelope.source_system", "type": "SCALAR", "description": "Originating source system."},
-    {"name": "organization.org_type", "type": "SCALAR", "description": "court, agency, committee, firm, or party_entity."},
-    {"name": "organization.name", "type": "TEXT", "description": "Organization display name.", "embeddable": true},
-    {"name": "organization.short_name", "type": "TEXT", "description": "Abbreviated name."},
-    {"name": "organization.jurisdiction", "type": "SCALAR", "description": "Jurisdiction code such as ca9 or federal."},
-    {"name": "organization.parent_org_id", "type": "SCALAR", "description": "Canonical parent organization UUID."},
-
-    {"name": "person.envelope.id", "type": "SCALAR", "description": "Canonical person UUID."},
-    {"name": "person.envelope.source_system", "type": "SCALAR", "description": "Originating source system."},
-    {"name": "person.role_types", "type": "SCALAR", "description": "Roles such as judge, legislator, attorney, party, or official.", "unit": "item", "fanout": 2.0},
-    {"name": "person.name_first", "type": "TEXT", "description": "First name."},
-    {"name": "person.name_last", "type": "TEXT", "description": "Last name."},
-    {"name": "person.political_affiliations", "type": "SCALAR", "description": "Political affiliation values.", "unit": "item", "fanout": 2.0},
-    {"name": "person.photo_ref", "type": "IMAGE_SET", "description": "Portrait or other image reference.", "unit": "image", "quantifier": "ANY"},
-
-    {"name": "position.envelope.id", "type": "SCALAR", "description": "Canonical position UUID."},
-    {"name": "position.person_id", "type": "SCALAR", "description": "Person holding the position."},
-    {"name": "position.organization_id", "type": "SCALAR", "description": "Organization for the position."},
-    {"name": "position.title", "type": "TEXT", "description": "Position title.", "embeddable": true},
-    {"name": "position.date_start", "type": "DATE", "description": "Position start date."},
-    {"name": "position.date_end", "type": "DATE", "description": "Position end date."},
-
-    {"name": "proceeding.envelope.id", "type": "SCALAR", "description": "Canonical proceeding UUID."},
-    {"name": "proceeding.envelope.source_system", "type": "SCALAR", "description": "Originating source system."},
-    {"name": "proceeding.proceeding_type", "type": "SCALAR", "description": "case, bill, or regulation_docket."},
-    {"name": "proceeding.number", "type": "SCALAR", "description": "Docket or bill number."},
-    {"name": "proceeding.title", "type": "TEXT", "description": "Case or proceeding title.", "embeddable": true},
-    {"name": "proceeding.organization_id", "type": "SCALAR", "description": "Court, chamber, or agency UUID."},
-    {"name": "proceeding.party_ids", "type": "SCALAR", "description": "Canonical party UUIDs.", "unit": "item", "fanout": 4.0},
-    {"name": "proceeding.date_filed", "type": "DATE", "description": "Filed date."},
-    {"name": "proceeding.status", "type": "SCALAR", "description": "Proceeding status."},
-    {"name": "proceeding.document_ids", "type": "SCALAR", "description": "Canonical document UUIDs.", "unit": "item", "fanout": 8.0},
-
-    {"name": "document.envelope.id", "type": "SCALAR", "description": "Canonical document UUID."},
-    {"name": "document.envelope.source_system", "type": "SCALAR", "description": "courtlistener, ecfr, govinfo, congress, or oyez."},
-    {"name": "document.envelope.external_ids", "type": "SCALAR", "description": "Cross-source identifier map."},
-    {"name": "document.doc_type", "type": "SCALAR", "description": "opinion, cfr_section, bill, statute, oral_argument, or other."},
-    {"name": "document.title", "type": "TEXT", "description": "Document title.", "embeddable": true},
-    {"name": "document.citation", "type": "SCALAR", "description": "Canonical citation string."},
-    {"name": "document.jurisdiction", "type": "SCALAR", "description": "Jurisdiction code."},
-    {"name": "document.issuing_body_id", "type": "SCALAR", "description": "Issuing organization UUID."},
-    {"name": "document.date_issued", "type": "DATE", "description": "Issue date."},
-    {"name": "document.status", "type": "SCALAR", "description": "Publication or lifecycle status."},
-    {"name": "document.summary", "type": "TEXT", "description": "Document summary.", "embeddable": true},
-    {"name": "document.media.text.plain_text", "type": "TEXT", "description": "Full normalized text body.", "embeddable": true, "storage": "virtual", "index": "fts"},
-    {"name": "document.media.images", "type": "IMAGE_SET", "description": "Scanned pages and exhibits.", "unit": "page", "fanout": 24.0, "quantifier": "ANY"},
-    {"name": "document.media.audio", "type": "AUDIO", "description": "Audio recordings and time-aligned transcript data.", "unit": "segment", "fanout": 120.0, "quantifier": "ANY", "embeddable": true},
-    {"name": "document.source_pdf_url", "type": "SCALAR", "description": "Source PDF URL."},
-    {"name": "document.hierarchy_path", "type": "TEXT", "description": "Regulatory or legislative hierarchy path."},
-    {"name": "document.proceeding_id", "type": "SCALAR", "description": "Parent proceeding UUID."},
-    {"name": "document.cites", "type": "SCALAR", "description": "Canonical cited document UUIDs.", "unit": "item", "fanout": 12.0},
-
-    {"name": "citation.envelope.id", "type": "SCALAR", "description": "Canonical citation edge UUID."},
-    {"name": "citation.citing_document_id", "type": "SCALAR", "description": "Citing document UUID."},
-    {"name": "citation.cited_document_id", "type": "SCALAR", "description": "Resolved cited document UUID."},
-    {"name": "citation.citation_string", "type": "SCALAR", "description": "Printed citation, matched even when unresolved."},
-    {"name": "citation.treatment", "type": "SCALAR", "description": "followed, distinguished, overruled, or cited."},
-
-    {"name": "event.envelope.id", "type": "SCALAR", "description": "Canonical event UUID."},
-    {"name": "event.event_type", "type": "SCALAR", "description": "Docket entry, vote, hearing, filing, or action."},
-    {"name": "event.proceeding_id", "type": "SCALAR", "description": "Parent proceeding UUID."},
-    {"name": "event.person_id", "type": "SCALAR", "description": "Related person UUID."},
-    {"name": "event.date", "type": "DATE", "description": "Event date."},
-    {"name": "event.description", "type": "TEXT", "description": "Event description.", "embeddable": true},
-    {"name": "event.outcome", "type": "TEXT", "description": "Event outcome."},
-
-    {"name": "financialdisclosure.envelope.id", "type": "SCALAR", "description": "Canonical disclosure UUID."},
-    {"name": "financialdisclosure.person_id", "type": "SCALAR", "description": "Disclosing person UUID."},
-    {"name": "financialdisclosure.year", "type": "SCALAR", "description": "Reporting year."},
-    {"name": "financialdisclosure.filepath", "type": "DOC_SCAN", "description": "Scanned financial disclosure file.", "unit": "page", "fanout": 8.0, "quantifier": "ANY", "derivation": "RASTERIZE"},
-
-    {"name": "criminalrecord.envelope.id", "type": "SCALAR", "description": "Canonical criminal-record UUID."},
-    {"name": "criminalrecord.person_id", "type": "SCALAR", "description": "Related person UUID."},
-    {"name": "criminalrecord.name", "type": "TEXT", "description": "Record name."},
-    {"name": "criminalrecord.disposition", "type": "TEXT", "description": "Disposition text.", "embeddable": true},
-    {"name": "criminalrecord.status", "type": "SCALAR", "description": "Record status."}
+    {
+      "name": "organization.envelope.id",
+      "type": "SCALAR",
+      "description": "Canonical organization UUID."
+    },
+    {
+      "name": "organization.envelope.source_system",
+      "type": "SCALAR",
+      "description": "Originating source system."
+    },
+    {
+      "name": "organization.envelope.source_id",
+      "type": "SCALAR",
+      "description": "CourtListener court id: scotus, ca1..ca11, cadc, cafc, and lower-court ids such as texapp, cand, nysd. Use for exact court matches (org.envelope.source_id = 'ca9')."
+    },
+    {
+      "name": "organization.org_type",
+      "type": "SCALAR",
+      "description": "court, agency, committee, firm, or party_entity."
+    },
+    {
+      "name": "organization.name",
+      "type": "TEXT",
+      "description": "Court name, e.g. 'Court of Appeals for the Ninth Circuit', 'Supreme Court of the United States', 'Court of Criminal Appeals of Tennessee', 'Court of Chancery of Delaware'. To scope a search to a court, circuit or state: join document.proceeding_id -> proceeding.organization_id -> organization and use fuzzy() on this field, e.g. fuzzy(org.name, 'Ninth Circuit') or fuzzy(org.name, 'Texas').",
+      "embeddable": true
+    },
+    {
+      "name": "organization.short_name",
+      "type": "TEXT",
+      "description": "Abbreviated court name, e.g. 'Ninth Circuit', 'Supreme Court', 'E.D. California'."
+    },
+    {
+      "name": "organization.jurisdiction",
+      "type": "SCALAR",
+      "description": "Court-TYPE code: F federal appellate, FD federal district, FB federal bankruptcy, S state supreme, SA state appellate, ST state trial. It is NOT a state, circuit or place - never use it for 'Texas' or 'Ninth Circuit' (use organization.name)."
+    },
+    {
+      "name": "organization.parent_org_id",
+      "type": "SCALAR",
+      "description": "Canonical parent organization UUID."
+    },
+    {
+      "name": "person.envelope.id",
+      "type": "SCALAR",
+      "description": "Canonical person UUID."
+    },
+    {
+      "name": "person.envelope.source_system",
+      "type": "SCALAR",
+      "description": "Originating source system."
+    },
+    {
+      "name": "person.role_types",
+      "type": "SCALAR",
+      "description": "Roles such as judge, legislator, attorney, party, or official.",
+      "unit": "item",
+      "fanout": 2.0
+    },
+    {
+      "name": "person.name_first",
+      "type": "TEXT",
+      "description": "First name."
+    },
+    {
+      "name": "person.name_last",
+      "type": "TEXT",
+      "description": "Last name."
+    },
+    {
+      "name": "person.political_affiliations",
+      "type": "SCALAR",
+      "description": "Political affiliation values.",
+      "unit": "item",
+      "fanout": 2.0
+    },
+    {
+      "name": "person.photo_ref",
+      "type": "IMAGE_SET",
+      "description": "Portrait or other image reference.",
+      "unit": "image",
+      "quantifier": "ANY"
+    },
+    {
+      "name": "position.envelope.id",
+      "type": "SCALAR",
+      "description": "Canonical position UUID."
+    },
+    {
+      "name": "position.person_id",
+      "type": "SCALAR",
+      "description": "Person holding the position."
+    },
+    {
+      "name": "position.organization_id",
+      "type": "SCALAR",
+      "description": "Organization for the position."
+    },
+    {
+      "name": "position.title",
+      "type": "TEXT",
+      "description": "Position title.",
+      "embeddable": true
+    },
+    {
+      "name": "position.date_start",
+      "type": "DATE",
+      "description": "Position start date."
+    },
+    {
+      "name": "position.date_end",
+      "type": "DATE",
+      "description": "Position end date."
+    },
+    {
+      "name": "proceeding.envelope.id",
+      "type": "SCALAR",
+      "description": "Canonical proceeding UUID."
+    },
+    {
+      "name": "proceeding.envelope.source_system",
+      "type": "SCALAR",
+      "description": "Originating source system."
+    },
+    {
+      "name": "proceeding.proceeding_type",
+      "type": "SCALAR",
+      "description": "case, bill, or regulation_docket."
+    },
+    {
+      "name": "proceeding.number",
+      "type": "SCALAR",
+      "description": "Docket or bill number."
+    },
+    {
+      "name": "proceeding.title",
+      "type": "TEXT",
+      "description": "Case caption - party names only, e.g. 'Smith v. Jones'. It never carries subject matter: never use it for topics. Topical predicates belong on document.media.text.plain_text or document.summary.",
+      "embeddable": true
+    },
+    {
+      "name": "proceeding.organization_id",
+      "type": "SCALAR",
+      "description": "The court (organization UUID) the case is before. Populated for every case; the way to reach a case's court."
+    },
+    {
+      "name": "proceeding.party_ids",
+      "type": "SCALAR",
+      "description": "Canonical party UUIDs.",
+      "unit": "item",
+      "fanout": 4.0
+    },
+    {
+      "name": "proceeding.date_filed",
+      "type": "DATE",
+      "description": "Filed date."
+    },
+    {
+      "name": "proceeding.status",
+      "type": "SCALAR",
+      "description": "Proceeding status."
+    },
+    {
+      "name": "proceeding.document_ids",
+      "type": "SCALAR",
+      "description": "Canonical document UUIDs.",
+      "unit": "item",
+      "fanout": 8.0
+    },
+    {
+      "name": "document.envelope.id",
+      "type": "SCALAR",
+      "description": "Canonical document UUID."
+    },
+    {
+      "name": "document.envelope.source_system",
+      "type": "SCALAR",
+      "description": "courtlistener, ecfr, govinfo, congress, or oyez."
+    },
+    {
+      "name": "document.envelope.external_ids",
+      "type": "SCALAR",
+      "description": "Cross-source identifier map."
+    },
+    {
+      "name": "document.doc_type",
+      "type": "SCALAR",
+      "description": "opinion (5.4M court opinions), oral_argument (6.7k Supreme Court arguments with audio + transcript), cfr_section (229k), bill (41k), statute, federal_register_notice, other. For 'cases about X' prefer opinion and/or oral_argument."
+    },
+    {
+      "name": "document.title",
+      "type": "TEXT",
+      "description": "Case name for opinions (e.g. 'Copley v. Brander'); section heading for CFR; 'Oral Argument - <date>' for oral arguments (their case name is on the linked proceeding.title).",
+      "embeddable": true
+    },
+    {
+      "name": "document.citation",
+      "type": "SCALAR",
+      "description": "Canonical citation string."
+    },
+    {
+      "name": "document.jurisdiction",
+      "type": "SCALAR",
+      "description": "NOT populated for court opinions (always null). Never filter on it. To scope by court or state, join document.proceeding_id -> proceeding.organization_id -> organization and use organization.name."
+    },
+    {
+      "name": "document.issuing_body_id",
+      "type": "SCALAR",
+      "description": "Not populated for court opinions. Reach the court via document.proceeding_id -> proceeding.organization_id -> organization instead."
+    },
+    {
+      "name": "document.date_issued",
+      "type": "DATE",
+      "description": "Date the opinion was issued / the argument was heard. Populated for every opinion."
+    },
+    {
+      "name": "document.status",
+      "type": "SCALAR",
+      "description": "Publication or lifecycle status."
+    },
+    {
+      "name": "document.summary",
+      "type": "TEXT",
+      "description": "Short procedural syllabus of an opinion, e.g. 'Appeal from the district court for Douglas county'. Present for about 1 in 5 opinions.",
+      "embeddable": true
+    },
+    {
+      "name": "document.media.text.plain_text",
+      "type": "TEXT",
+      "description": "The document's text: the opinion body, or for doc_type = 'oral_argument' the full transcript of the Supreme Court argument. The preferred field for topical fuzzy() predicates about what a case discusses.",
+      "embeddable": true,
+      "storage": "virtual",
+      "index": "fts"
+    },
+    {
+      "name": "document.media.images",
+      "type": "IMAGE_SET",
+      "description": "Scanned pages and exhibits.",
+      "unit": "page",
+      "fanout": 24.0,
+      "quantifier": "ANY"
+    },
+    {
+      "name": "document.media.audio",
+      "type": "AUDIO",
+      "description": "Audio recordings and time-aligned transcript data.",
+      "unit": "segment",
+      "fanout": 120.0,
+      "quantifier": "ANY",
+      "embeddable": true
+    },
+    {
+      "name": "document.source_pdf_url",
+      "type": "SCALAR",
+      "description": "Source PDF URL."
+    },
+    {
+      "name": "document.hierarchy_path",
+      "type": "TEXT",
+      "description": "Regulatory or legislative hierarchy path."
+    },
+    {
+      "name": "document.proceeding_id",
+      "type": "SCALAR",
+      "description": "Parent proceeding UUID."
+    },
+    {
+      "name": "document.cites",
+      "type": "SCALAR",
+      "description": "Canonical cited document UUIDs.",
+      "unit": "item",
+      "fanout": 12.0
+    },
+    {
+      "name": "citation.envelope.id",
+      "type": "SCALAR",
+      "description": "EMPTY in the current corpus: the citation table has no rows. Do not join to citation - any query requiring it returns nothing."
+    },
+    {
+      "name": "citation.citing_document_id",
+      "type": "SCALAR",
+      "description": "EMPTY in the current corpus. Do not use."
+    },
+    {
+      "name": "citation.cited_document_id",
+      "type": "SCALAR",
+      "description": "EMPTY in the current corpus. Do not use."
+    },
+    {
+      "name": "citation.citation_string",
+      "type": "SCALAR",
+      "description": "EMPTY in the current corpus. Do not use."
+    },
+    {
+      "name": "citation.treatment",
+      "type": "SCALAR",
+      "description": "EMPTY in the current corpus. Do not use."
+    },
+    {
+      "name": "event.envelope.id",
+      "type": "SCALAR",
+      "description": "Canonical event UUID."
+    },
+    {
+      "name": "event.event_type",
+      "type": "SCALAR",
+      "description": "Docket entry, vote, hearing, filing, or action."
+    },
+    {
+      "name": "event.proceeding_id",
+      "type": "SCALAR",
+      "description": "Parent proceeding UUID."
+    },
+    {
+      "name": "event.person_id",
+      "type": "SCALAR",
+      "description": "Related person UUID."
+    },
+    {
+      "name": "event.date",
+      "type": "DATE",
+      "description": "Event date."
+    },
+    {
+      "name": "event.description",
+      "type": "TEXT",
+      "description": "Event description.",
+      "embeddable": true
+    },
+    {
+      "name": "event.outcome",
+      "type": "TEXT",
+      "description": "Event outcome."
+    },
+    {
+      "name": "financialdisclosure.envelope.id",
+      "type": "SCALAR",
+      "description": "Canonical disclosure UUID."
+    },
+    {
+      "name": "financialdisclosure.person_id",
+      "type": "SCALAR",
+      "description": "Disclosing person UUID."
+    },
+    {
+      "name": "financialdisclosure.year",
+      "type": "SCALAR",
+      "description": "Reporting year."
+    },
+    {
+      "name": "financialdisclosure.filepath",
+      "type": "DOC_SCAN",
+      "description": "Scanned financial disclosure file.",
+      "unit": "page",
+      "fanout": 8.0,
+      "quantifier": "ANY",
+      "derivation": "RASTERIZE"
+    },
+    {
+      "name": "criminalrecord.envelope.id",
+      "type": "SCALAR",
+      "description": "Canonical criminal-record UUID."
+    },
+    {
+      "name": "criminalrecord.person_id",
+      "type": "SCALAR",
+      "description": "Related person UUID."
+    },
+    {
+      "name": "criminalrecord.name",
+      "type": "TEXT",
+      "description": "Record name."
+    },
+    {
+      "name": "criminalrecord.disposition",
+      "type": "TEXT",
+      "description": "Disposition text.",
+      "embeddable": true
+    },
+    {
+      "name": "criminalrecord.status",
+      "type": "SCALAR",
+      "description": "Record status."
+    }
   ],
   "edges": [
-    ["organization.parent_org_id", "organization.envelope.id"],
-    ["position.person_id", "person.envelope.id"],
-    ["position.organization_id", "organization.envelope.id"],
-    ["proceeding.organization_id", "organization.envelope.id"],
-    ["document.issuing_body_id", "organization.envelope.id"],
-    ["document.proceeding_id", "proceeding.envelope.id"],
-    ["citation.citing_document_id", "document.envelope.id"],
-    ["citation.cited_document_id", "document.envelope.id"],
-    ["event.proceeding_id", "proceeding.envelope.id"],
-    ["event.person_id", "person.envelope.id"],
-    ["financialdisclosure.person_id", "person.envelope.id"],
-    ["criminalrecord.person_id", "person.envelope.id"]
+    [
+      "organization.parent_org_id",
+      "organization.envelope.id"
+    ],
+    [
+      "position.person_id",
+      "person.envelope.id"
+    ],
+    [
+      "position.organization_id",
+      "organization.envelope.id"
+    ],
+    [
+      "proceeding.organization_id",
+      "organization.envelope.id"
+    ],
+    [
+      "document.issuing_body_id",
+      "organization.envelope.id"
+    ],
+    [
+      "document.proceeding_id",
+      "proceeding.envelope.id"
+    ],
+    [
+      "citation.citing_document_id",
+      "document.envelope.id"
+    ],
+    [
+      "citation.cited_document_id",
+      "document.envelope.id"
+    ],
+    [
+      "event.proceeding_id",
+      "proceeding.envelope.id"
+    ],
+    [
+      "event.person_id",
+      "person.envelope.id"
+    ],
+    [
+      "financialdisclosure.person_id",
+      "person.envelope.id"
+    ],
+    [
+      "criminalrecord.person_id",
+      "person.envelope.id"
+    ]
   ]
 }

@@ -5,9 +5,13 @@ import type { BqlQuery } from "@/lib/bql";
  * `scripts/web.sh` exports it into this process as `NEXT_PUBLIC_AMICUS_API_URL`, which
  * Next inlines into the browser bundle. Nothing secret ever passes through here.
  */
-const API_URL = (
+export const API_URL = (
   process.env.NEXT_PUBLIC_AMICUS_API_URL ?? "http://127.0.0.1:8000"
 ).replace(/\/$/, "");
+
+/** Which schema the API compiles against. `dataform` is the ingested corpus the
+ *  executor can actually run; `courtlistener` plans still hit unwired operators. */
+export const SCHEMA = process.env.NEXT_PUBLIC_AMICUS_SCHEMA ?? "dataform";
 
 /** One stage of the pipeline. `stub` means the module behind that stage is not written yet. */
 export type Stage = {
@@ -29,7 +33,9 @@ export type CompiledSearchEnvelope = {
   query: BqlQuery;
   bql: string;
   stages: Stage[];
-  plan: unknown | null;
+  /** Optimized ExecutionPlan (optimizer.to_json). Post it to /execute. */
+  plan: Record<string, unknown> | null;
+  /** Executor output when the API ran the plan itself (`execute: true`). */
   results: unknown | null;
   warnings?: string[];
 };
@@ -78,14 +84,22 @@ function isCompiledSearch(payload: unknown): payload is CompiledSearchEnvelope {
  */
 export async function compileQuery(
   question: string,
-  signal?: AbortSignal,
+  {
+    signal,
+    execute = false,
+  }: {
+    signal?: AbortSignal;
+    /** false (default): stop after optimize so the plan can be run via /execute
+     *  while the UI shows the compiled query. true: run everything in one call. */
+    execute?: boolean;
+  } = {},
 ): Promise<CompileEnvelope> {
   let response: Response;
   try {
     response = await fetch(`${API_URL}/compile`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ question }),
+      body: JSON.stringify({ question, execute, schema: SCHEMA }),
       signal,
     });
   } catch (reason) {

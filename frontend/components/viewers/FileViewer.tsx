@@ -17,14 +17,23 @@ export default function FileViewer({ file }: { file: ResultFile }) {
       return <PdfViewer file={file} />;
     case "text":
       return <TextViewer file={file} />;
+    case "link":
     default:
+      // An HTML page (e.g. the CourtListener opinion) or something we can't
+      // embed: hand off to a new tab, with the rationale if we have one.
       return (
-        <p className="text-sm text-neutral-500">
-          No inline preview for this file.{" "}
-          <a href={file.url} target="_blank" rel="noreferrer" className="underline">
+        <div className="flex flex-col gap-3 text-sm text-neutral-600">
+          {file.snippet && <p className="italic">“{file.snippet}”</p>}
+          <a
+            href={file.url}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex w-fit items-center gap-1.5 rounded-lg bg-neutral-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-neutral-800"
+          >
             Open {fileTitle(file)} ↗
           </a>
-        </p>
+          <p className="break-all font-mono text-[11px] text-neutral-400">{file.url}</p>
+        </div>
       );
   }
 }
@@ -34,7 +43,7 @@ export function KindIcon({
   kind,
   className = "",
 }: {
-  kind: FileKind | "unknown";
+  kind: FileKind;
   className?: string;
 }) {
   const common = {
@@ -80,6 +89,14 @@ export function KindIcon({
           <path d="M3 3.5h10M3 6.5h10M3 9.5h7M3 12.5h5" />
         </svg>
       );
+    case "link":
+      return (
+        <svg {...common}>
+          <path d="M6.5 9.5l3-3" />
+          <path d="M7 4.5l1-1a2.5 2.5 0 0 1 3.5 3.5l-1 1" />
+          <path d="M9 11.5l-1 1A2.5 2.5 0 0 1 4.5 9l1-1" />
+        </svg>
+      );
     default:
       return (
         <svg {...common}>
@@ -90,10 +107,31 @@ export function KindIcon({
   }
 }
 
-export const KIND_LABEL: Record<FileKind | "unknown", string> = {
+/** Arrow to the top-right (16×16), for "opens in a new tab" affordances. */
+export function ArrowUpRightIcon({ className = "" }: { className?: string }) {
+  return (
+    <svg
+      width={16}
+      height={16}
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.5}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden
+    >
+      <path d="M4.5 11.5l7-7" />
+      <path d="M6 4.5h5.5V10" />
+    </svg>
+  );
+}
+
+export const KIND_LABEL: Record<FileKind, string> = {
   audio: "Audio",
   image: "Image",
   pdf: "PDF",
   text: "Text",
-  unknown: "File",
+  link: "Link",
 };
