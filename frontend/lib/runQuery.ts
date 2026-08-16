@@ -1,38 +1,40 @@
-import type { BqlQuery } from "@/lib/bql";
-import type { RunResponse } from "@/lib/results";
-import { DUMMY_RESULTS } from "@/lib/dummyResults";
+import { API_URL, type Stage } from "@/lib/compile";
+import { toRunResponse, type ExecResponse, type RunResponse } from "@/lib/results";
+
+type ExecuteEnvelope = {
+  ok: boolean;
+  stage: Stage;
+  results: ExecResponse | null;
+  message?: string;
+};
 
 /**
- * Execute a compiled query on the runtime.
- *
- * Set `AMICUS_RUNTIME_URL` in the repo-root `.env` (exported here as
- * `NEXT_PUBLIC_AMICUS_RUNTIME_URL` by `scripts/web.sh`) and this POSTs `{ query }` —
- * the BQL wire JSON — to `${url}/run`, expecting a `RunResponse` whose file entries
- * are URLs served by the DGX Spark. Unset, it waits `fallbackMs` and returns the
- * bundled fixtures, because `runtime/executor.py` is still a stub.
+ * Run an optimized plan (the `plan` field of a /compile envelope) on the
+ * runtime: `POST {API_URL}/execute { plan }`. Resolves to the card view model.
+ * Throws with the API's `message` on 422 / failure.
  */
 export async function runQuery(
-  query: BqlQuery,
-  { signal, fallbackMs = 10_000 }: { signal?: AbortSignal; fallbackMs?: number } = {},
+  plan: unknown,
+  { signal }: { signal?: AbortSignal } = {},
 ): Promise<RunResponse> {
-  const base = process.env.NEXT_PUBLIC_AMICUS_RUNTIME_URL;
-  if (!base) {
-    await new Promise<void>((resolve, reject) => {
-      const t = setTimeout(resolve, fallbackMs);
-      signal?.addEventListener("abort", () => {
-        clearTimeout(t);
-        reject(new DOMException("Aborted", "AbortError"));
-      });
+  let res: Response;
+  try {
+    res = await fetch(`${API_URL}/execute`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ plan }),
+      signal,
     });
-    return { results: DUMMY_RESULTS, total: DUMMY_RESULTS.length, tookMs: fallbackMs };
+  } catch (reason) {
+    if (reason instanceof DOMException && reason.name === "AbortError") throw reason;
+    throw new Error(`The Amicus API is unreachable at ${API_URL}.`);
   }
 
-  const res = await fetch(`${base.replace(/\/$/, "")}/run`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ query }),
-    signal,
-  });
-  if (!res.ok) throw new Error(`Runtime returned ${res.status} ${res.statusText}`);
-  return (await res.json()) as RunResponse;
+  const payload = (await res.json().catch(() => null)) as ExecuteEnvelope | null;
+  if (!res.ok || !payload?.ok || !payload.results) {
+    throw new Error(
+      payload?.message ?? `Executor returned ${res.status} ${res.statusText}`,
+    );
+  }
+  return toRunResponse(payload.results);
 }

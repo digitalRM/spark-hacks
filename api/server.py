@@ -48,10 +48,16 @@ class CompileRequest(BaseModel):
     schema_name: str | None = Field(default=None, alias='schema')
     no_cache: bool = False
     attempts: int = Field(default=compiler.MAX_ATTEMPTS, ge=1, le=10)
+    # False: stop after optimize and let the caller POST the plan to /execute. Lets a UI
+    # show the compiled query while the (slow) execution runs.
+    execute: bool = True
 
 class CheckRequest(BaseModel):
     query: dict[str, Any]
     schema_name: str | None = Field(default=None, alias='schema')
+
+class ExecuteRequest(BaseModel):
+    plan: dict[str, Any]
 
 def registry(name: str | None):
     """Load a schema, turning a bad name into a 400 rather than a stack trace."""
@@ -63,7 +69,14 @@ def compile_question(req: CompileRequest) -> JSONResponse:
     """Run one question through the whole pipeline. 200 when it compiled, 422 when it did not."""
     reg = registry(req.schema_name)
     out = driver.run(req.question, schema_name=reg.name, use_cache=not req.no_cache,
-                     max_attempts=req.attempts)
+                     max_attempts=req.attempts, execute=req.execute)
+    return JSONResponse(out, status_code=200 if out['ok'] else 422)
+
+@app.post('/execute')
+def execute_plan(req: ExecuteRequest) -> JSONResponse:
+    """Run a plan from a previous /compile (its `plan` field). 200 with `results` when the
+    executor ran, 422 with a `message` when it could not."""
+    out = driver.execute_plan(req.plan)
     return JSONResponse(out, status_code=200 if out['ok'] else 422)
 
 @app.post('/check')

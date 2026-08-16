@@ -38,7 +38,9 @@ for _p in (Path(__file__).resolve().parent, _REPO_ROOT, _REPO_ROOT / "data_inges
 
 from data_ingestion.dataform.models import (  # noqa: E402
     AudioAsset, Citation, Document, Event, ImageAsset, Organization, Person, Proceeding,
+    TextAsset,
 )
+import os  # noqa: E402
 from data_ingestion.dataform.store import Store  # noqa: E402
 from optimizer.plan import (  # noqa: E402
     Aggregate, Collapse, Column, ExactFilter, Expand, Limit, Materialize, PlanNode,
@@ -93,12 +95,28 @@ class Row:
     doc: Document
     element: Any = None
     evidence: list[dict] = field(default_factory=list)
+    # Entities reached through the Scan's joins, keyed by BOTH alias ("org") and table
+    # ("organization"), since plan nodes name fields either way. Resolved once per row by
+    # _resolve_joins; empty for single-table plans.
+    joined: dict[str, Any] = field(default_factory=dict)
+
+    def entity(self, source: str | None) -> Any:
+        """The record a field source refers to: a joined entity, None for a known-but-
+        unresolved alias, else the base row."""
+        if source and source in self.joined:
+            return self.joined[source]
+        if source and source in self.aliases:
+            return None
+        return self.doc
 
     def value(self, ref: FieldRef) -> Any:
         # An unnested field resolves to the current element; everything else walks the doc.
         if self.element is not None and ref.path and ref.path[-1] in ("scan_pages", "segments",
                                                                        "images", "audio"):
             return self.element
+        src = getattr(ref, "source", None)
+        if src and src in self.joined:
+            return _walk(self.joined[src], ref.path)
         return _walk(self.doc, ref.path)
 
 
@@ -139,7 +157,11 @@ class _Ctx:
     store: Store
     stages: list[_Stage] = field(default_factory=list)
     memo: dict[tuple, tuple[bool, float, str]] = field(default_factory=dict)  # (model,text,content)->verdict
-    scan_queries: dict[str, tuple[str, tuple]] = field(default_factory=dict)  # scan node_id -> (sql, params)
+    scan_queries: dict[str, list[tuple[str, tuple]]] = field(default_factory=dict)  # scan node_id -> tiers
+    scan_base: dict[str, tuple[str, str]] = field(default_factory=dict)  # scan node_id -> (table, alias)
+    scan_cap: dict[str, int] = field(default_factory=dict)  # scan node_id -> rows handed to the pipeline
+    has_text: bool = False  # textdb.opinion_text is attached and readable
+    plan_root: Any = None
 
     def record(self, s: _Stage) -> None:
         self.stages.append(s)
@@ -170,9 +192,38 @@ def _parse_verdict(raw: str) -> tuple[bool, float, str]:
         return False, 0.0, "malformed"
 
 
+# Fields that mean "the document's text". When the requested one is empty (full text was
+# not ingested for most of the corpus) fall back to the best text we do have, and label the
+# evidence with the field actually judged so the claim stays honest.
+_TEXT_FIELDS = {("media", "text", "plain_text"), ("plain_text",), ("text",)}
+_TEXT_FALLBACK = (("media", "text", "plain_text"), ("summary",), ("title",))
+
+
+def _audio_text(ent: Any) -> tuple[str, Any] | None:
+    """(transcript text, AudioAsset) for the first audio asset that has any text."""
+    media = getattr(ent, "media", None)
+    for a in (getattr(media, "audio", None) or []):
+        text = a.transcript or " ".join(s.get("text", "") for s in (a.timestamp_index or []) if s.get("text"))
+        if text.strip():
+            return text, a
+    return None
+
+
 def _extract_content(row: Row, node: SemanticFilter) -> tuple[str, str | None, dict]:
     """Return (text_content, image_ref, evidence_stub) for the field this node reads."""
     val = row.value(node.field)
+    if (val is None or val == "") and tuple(node.field.path) in _TEXT_FIELDS:
+        ent = row.entity(getattr(node.field, "source", None))
+        for alt in _TEXT_FALLBACK:
+            if alt == ("title",):
+                # a transcript beats a bare title: oral arguments carry their text in audio
+                hit = _audio_text(ent) if ent is not None else None
+                if hit:
+                    text, asset = hit
+                    return text, None, {"kind": "audio", "label": "oral argument", "ref": asset.audio_ref}
+            v = _walk(ent, alt) if ent is not None else None
+            if isinstance(v, str) and v.strip():
+                return v, None, {"kind": "text", "label": alt[-1], "ref": None}
     if isinstance(val, ImageAsset):
         loc = f"page {val.page_number}" if val.page_number else "exhibit"
         return "", val.image_ref, {"kind": "image", "label": loc, "ref": val.image_ref}
@@ -185,7 +236,52 @@ def _extract_content(row: Row, node: SemanticFilter) -> tuple[str, str | None, d
     return "", None, {"kind": "text", "label": "text", "ref": None}
 
 
+# Long texts are judged on excerpts centred on the predicate's keywords rather than in
+# full: the verdict is about whether the text discusses X, and the passages that mention X
+# are where that is decided. Cheaper (prompt tokens) and sharper (less dilution).
+_EXCERPT_CHARS = 4000
+_EXCERPT_WINDOW = 700
+
+
+def _focus(content: str, predicate: str) -> str:
+    if len(content) <= _EXCERPT_CHARS:
+        return content
+    low = content.lower()
+    spans: list[tuple[int, int]] = []
+    for kw in _keywords(predicate, limit=6):
+        start = 0
+        k = kw.lower()
+        while len(spans) < 12:
+            i = low.find(k, start)
+            if i < 0:
+                break
+            spans.append((max(0, i - _EXCERPT_WINDOW // 2), min(len(content), i + _EXCERPT_WINDOW // 2)))
+            start = i + len(k)
+    if not spans:
+        return content[:_EXCERPT_CHARS]
+    spans.sort()
+    merged: list[list[int]] = []
+    for a, b in spans:
+        if merged and a <= merged[-1][1]:
+            merged[-1][1] = max(merged[-1][1], b)
+        else:
+            merged.append([a, b])
+    out, used = [], 0
+    for a, b in merged:
+        piece = content[a:b]
+        if used + len(piece) > _EXCERPT_CHARS:
+            piece = piece[: max(0, _EXCERPT_CHARS - used)]
+        if piece:
+            out.append(piece.strip())
+            used += len(piece)
+        if used >= _EXCERPT_CHARS:
+            break
+    return "\n…\n".join(out)
+
+
 async def _judge(ep, content: str, image_ref: str | None, predicate: str, client) -> tuple[bool, float, str]:
+    if image_ref is None:
+        content = _focus(content, predicate)
     if image_ref is not None:
         messages = [{"role": "system", "content": _JUDGE_SYSTEM},
                     {"role": "user", "content": [
@@ -195,7 +291,12 @@ async def _judge(ep, content: str, image_ref: str | None, predicate: str, client
         content = content[: ep.max_input_chars]  # the hard context limit, enforced here
         messages = [{"role": "system", "content": _JUDGE_SYSTEM},
                     {"role": "user", "content": f"PREDICATE: {predicate}\n\nCONTENT:\n{content}"}]
-    resp = await client.chat.completions.create(model=ep.model_id, messages=messages, temperature=0)
+    # A verdict is 30 tokens of JSON. Lightning is a reasoning model and will otherwise spend
+    # ~3k tokens (~100 s) thinking per row, so thinking is switched off and output capped.
+    resp = await client.chat.completions.create(
+        model=ep.model_id, messages=messages, temperature=0, max_tokens=200,
+        response_format={"type": "json_object"},
+        extra_body={"chat_template_kwargs": {"enable_thinking": False}})
     return _parse_verdict(resp.choices[0].message.content or "")
 
 
@@ -229,7 +330,7 @@ async def _run_semantic(node: SemanticFilter, rows: list[Row], ctx: _Ctx) -> lis
             match = not match
         if match:
             ev = {**ev, "quote": why, "confidence": conf}
-            return Row(row.doc, row.element, row.evidence + [ev])
+            return Row(row.doc, row.element, row.evidence + [ev], row.joined)
         return None
 
     judged = await asyncio.gather(*(judge_row(r) for r in rows))
@@ -251,7 +352,301 @@ _SCAN_CAP_SEMANTIC = 15
 _SCAN_CAP_PLAIN = 200
 
 
-def _plan_scan_query(root: PlanNode, scan: Scan) -> tuple[str, tuple]:
+# The join shape the optimizer prints into Scan.sql: `<table> AS <alias> JOIN <table> AS
+# <alias> ON <a.path> = <b.path> ...`. Parsed back here because the plan carries no AST.
+_JOIN_RE = re.compile(r'JOIN\s+(?P<table>\w+)\s+AS\s+(?P<alias>\w+)\s+ON\s+'
+                      r'(?P<l>[\w.]+)\s*=\s*(?P<r>[\w.]+)', re.I)
+_BASE_RE = re.compile(r'^\s*(?P<table>\w+)\s+AS\s+(?P<alias>\w+)', re.I)
+
+# Words that carry no signal for candidate retrieval (function words + the framing the
+# compiler tends to add around a predicate).
+_STOP = set("""a an the of in on at to from by for with and or nor but that this these those
+which who whom whose where when what how was were is are be been being has have had do does
+did not no any all some such than then there their they them its it as into onto over under
+about above below between within without describes describe mentions mention discusses discuss
+concerning regarding involving involves involve related relating includes include including
+contains contain containing states state stating says said whether if while also very more
+most less least other another each every either neither both few many much own same so too""".split())
+
+
+def _keywords(text: str, limit: int = 5) -> list[str]:
+    """Content words of a semantic predicate, proper nouns first, longest next."""
+    seen: list[str] = []
+    for w in re.findall(r"[A-Za-z][A-Za-z0-9'\-]{2,}", text):
+        lw = w.lower()
+        if lw in _STOP or lw in (x.lower() for x in seen):
+            continue
+        seen.append(w)
+    proper = [w for w in seen if w[0].isupper() and text.find(w) > 0]  # not sentence-initial
+    rest = sorted((w for w in seen if w not in proper), key=len, reverse=True)
+    return (proper + rest)[:limit]
+
+
+def _scan_joins(scan: Scan) -> tuple[str, str, list[tuple[str, tuple[str, ...], str, tuple[str, ...]]]]:
+    """(base_table, base_alias, [(lhs_alias, lhs_path, rhs_alias, rhs_path), ...])."""
+    sql = scan.sql or ""
+    m = _BASE_RE.match(sql)
+    base_table = m["table"] if m else scan.tables[0]
+    base_alias = m["alias"] if m else base_table
+    conds = []
+    for j in _JOIN_RE.finditer(sql):
+        la, *lp = j["l"].split(".")
+        ra, *rp = j["r"].split(".")
+        conds.append((la, tuple(lp), ra, tuple(rp)))
+    return base_table, base_alias, conds
+
+
+def _alias_tables(scan: Scan) -> dict[str, str]:
+    """alias -> table for every table the Scan names."""
+    out: dict[str, str] = {}
+    sql = scan.sql or ""
+    m = _BASE_RE.match(sql)
+    if m: out[m["alias"]] = m["table"]
+    for j in _JOIN_RE.finditer(sql):
+        out[j["alias"]] = j["table"]
+    for t in scan.tables:  # a table is also addressable by its own name
+        out.setdefault(t, t)
+    return out
+
+
+def _prefilter_joined(root: PlanNode, scan: Scan, rows: list[Row],
+                      base: tuple[str, str]) -> list[Row]:
+    """Apply the plan's filters on JOINED tables to the retrieved pool, cheaply, before the
+    cap: exact predicates exactly; semantic predicates on a small joined table (a court
+    name) as a keyword pre-check -- every proper noun in the predicate must appear in the
+    field, or any keyword if there are none. The semantic node still judges survivors."""
+    base_table, base_alias = base
+    base_names = {base_table, base_alias}
+    keeps = []
+    for n in walk(root):
+        if isinstance(n, ExactFilter):
+            m = _EXACT_RE.search(n.predicate)
+            if not m:
+                continue
+            alias, *rest = m["lhs"].split(".")
+            if alias in base_names or not rest:
+                continue
+            ref, op, rhs = FieldRef(alias, tuple(rest)), m["op"], m["rhs"]
+            def k_exact(r: Row, ref=ref, op=op, rhs=rhs) -> bool:
+                v = r.value(ref)
+                v = getattr(v, "value", v)
+                if v is None:
+                    return False
+                sv = str(v)
+                return {"=": sv == rhs, ">=": sv >= rhs, "<=": sv <= rhs, ">": sv > rhs, "<": sv < rhs}[op]
+            keeps.append(k_exact)
+        elif isinstance(n, SemanticFilter):
+            src = getattr(n.field, "source", None)
+            if not src or src in base_names:
+                continue
+            kws = _keywords(n.text, limit=6)
+            if not kws:
+                continue
+            proper = [k for k in kws if k[0].isupper()]
+            need = proper or kws
+            mode_all = bool(proper)
+            def k_sem(r: Row, ref=n.field, need=need, mode_all=mode_all) -> bool:
+                v = r.value(ref)
+                if not isinstance(v, str):
+                    return False
+                low = v.lower()
+                hits = [k.lower() in low for k in need]
+                return all(hits) if mode_all else any(hits)
+            keeps.append(k_sem)
+    if not keeps:
+        return rows
+    return [r for r in rows if all(k(r) for k in keeps)]
+
+
+def _resolve_joins(scan: Scan, rows: list[Row], ctx: "_Ctx",
+                   base: tuple[str, str] | None = None) -> None:
+    """Bind joined entities onto each row by following FK-equality conditions with
+    indexed primary-key lookups (`<alias>.envelope.id`). A condition whose unbound side is
+    not a primary key (a reverse foreign key) is left unresolved: there is no index for
+    it, and a full scan per row would be dishonest about cost. Lookups are memoised."""
+    base_table, base_alias, conds = _scan_joins(scan)
+    if base is not None:
+        base_table, base_alias = base
+    if not conds:
+        return
+    tables = _alias_tables(scan)
+    cache: dict[tuple[str, str], Any] = {}
+
+    def fetch(table: str, key: str) -> Any:
+        ck = (table, key)
+        if ck not in cache:
+            model = _TABLE_MODEL.get(table)
+            row = ctx.store.conn.execute(f"SELECT data FROM {table} WHERE id = ?", (key,)).fetchone()
+            cache[ck] = model.model_validate_json(row["data"]) if (row and model) else None
+        return cache[ck]
+
+    def is_pk(path: tuple[str, ...]) -> bool:
+        return path in (("envelope", "id"), ("id",))
+
+    for r in rows:
+        bound: dict[str, Any] = {base_alias: r.doc, base_table: r.doc}
+        progress = True
+        while progress:
+            progress = False
+            for la, lp, ra, rp in conds:
+                for (ba, bp, ua, up) in ((la, lp, ra, rp), (ra, rp, la, lp)):
+                    if ba in bound and ua not in bound and is_pk(up) and ua in tables:
+                        key = _walk(bound[ba], bp)
+                        if key is None:
+                            continue
+                        ent = fetch(tables[ua], str(key))
+                        if ent is not None:
+                            bound[ua] = ent
+                            bound[tables[ua]] = ent
+                            progress = True
+        r.joined = {k: v for k, v in bound.items() if v is not r.doc}
+
+
+# Retrieval budget: the whole tiered pre-filter must finish inside this many seconds; a
+# tier that overruns is abandoned and the next (broader, cheaper) one runs.
+_RETRIEVAL_BUDGET_S = 75.0
+
+# Opinion full text lives in a side database written by the opinions ingestion pass
+# (`opinion_text(opinion_id, cluster_id, ..., plain_text)`, indexed by cluster_id, WAL so it
+# is readable while it fills). `document.source_id` is the CourtListener cluster id, which
+# is how a document finds its text. Attached read-only as `textdb` when present.
+_TEXT_DB_ENV = "DATAFORM_TEXT_DB"
+
+
+def _attach_text_db(store: Store) -> bool:
+    candidates = [os.environ.get(_TEXT_DB_ENV, "")]
+    try:
+        candidates.append(str(Path(os.path.realpath(str(store.db_path))).parent / "dataform_api.db"))
+    except Exception:
+        pass
+    for p in candidates:
+        if not p or not Path(p).exists():
+            continue
+        try:
+            store.conn.execute("ATTACH DATABASE ? AS textdb", (f"file:{p}?mode=ro",))
+        except Exception:
+            try:
+                store.conn.execute("ATTACH DATABASE ? AS textdb", (p,))
+            except Exception:
+                continue
+        try:
+            store.conn.execute("SELECT 1 FROM textdb.opinion_text LIMIT 1").fetchall()
+            return True
+        except Exception:
+            try: store.conn.execute("DETACH DATABASE textdb")
+            except Exception: pass
+    return False
+
+
+def _hydrate_text(rows: list[Row], ctx: "_Ctx") -> None:
+    """Fill `media.text.plain_text` on CourtListener opinions from the side table."""
+    if not ctx.has_text:
+        return
+    for r in rows:
+        d = r.doc
+        if not isinstance(d, Document) or d.envelope.source_system != "courtlistener":
+            continue
+        if d.media.text is not None and (d.media.text.plain_text or "").strip():
+            continue
+        hit = ctx.store.conn.execute(
+            "SELECT plain_text FROM textdb.opinion_text WHERE cluster_id = ? LIMIT 1",
+            (d.envelope.source_id,)).fetchone()
+        if hit and hit[0]:
+            d.media.text = TextAsset(plain_text=hit[0])
+
+# Tables small enough to sit inside an IN (SELECT id ...) semi-join without an index.
+_SMALL_TABLES = {"organization", "person"}
+# BQL date fields that the store mirrors into its indexed `date` column.
+_DATE_FIELDS = {"date_issued", "date_filed", "date", "effective_date"}
+
+
+def _choose_base(root: PlanNode, scan: Scan) -> tuple[str, str]:
+    """(table, alias) to scan from. The optimizer's base is whatever the query listed
+    first; we scan from the table the semantic predicates actually read (most SEM nodes,
+    ties -> the optimizer's choice), because joins are resolved by primary-key lookups
+    from the scanned row outward and a semantic filter needs its text on the row."""
+    base_table, base_alias, _ = _scan_joins(scan)
+    tables = _alias_tables(scan)
+    votes: dict[str, int] = {}
+    for n in walk(root):
+        if isinstance(n, SemanticFilter):
+            src = getattr(n.field, "source", None)
+            t = tables.get(src, src) if src else base_table
+            if t in _TABLE_MODEL:
+                votes[t] = votes.get(t, 0) + 1
+    if not votes or votes.get(base_table, 0) >= max(votes.values()):
+        return base_table, base_alias
+    best = max(votes, key=lambda t: votes[t])
+    alias = next((a for a, t in tables.items() if t == best and a != t), best)
+    return best, alias
+
+
+def _json_path(path: tuple[str, ...]) -> str:
+    return "$." + ".".join(path)
+
+
+def _push_exact(m, base_names: set[str], scan: Scan, base_table: str,
+                where: list[str], params: list[Any]) -> None:
+    """Push one EXACT predicate into the Scan's SQL when it can be evaluated there:
+    a base-table field (indexed column, the `date` column, or json_extract), or a
+    single-hop semi-join into a small table the base points at by primary key."""
+    alias, *path = m["lhs"].split(".")
+    op, rhs = m["op"], m["rhs"]
+    if not path:
+        return
+    last = path[-1]
+    if alias in base_names:
+        if path[0] == "envelope" and last in _INDEXED_COLS or last in _INDEXED_COLS and len(path) == 1:
+            where.append(f"{last} {op} ?")
+        elif last in _DATE_FIELDS:
+            where.append(f"date {op} ?")
+        else:
+            where.append(f"json_extract(data, '{_json_path(tuple(path))}') {op} ?")
+        params.append(rhs)
+        return
+    # semi-join: base.<fk> = alias.envelope.id  and alias's table is small
+    tables = _alias_tables(scan)
+    t = tables.get(alias)
+    if t not in _SMALL_TABLES:
+        return
+    _, _, conds = _scan_joins(scan)
+    for la, lp, ra, rp in conds:
+        for (a1, p1, a2, p2) in ((la, lp, ra, rp), (ra, rp, la, lp)):
+            if a1 in base_names and a2 == alias and p2 in (("envelope", "id"), ("id",)):
+                where.append(f"json_extract(data, '{_json_path(p1)}') IN "
+                             f"(SELECT id FROM {t} WHERE json_extract(data, '{_json_path(tuple(path))}') {op} ?)")
+                params.append(rhs)
+                return
+
+
+# Display-form predicate (`doc.doc_type = "opinion"`, optionally EXACT(...)-wrapped or with a
+# `date` literal tag) -- used only to read the alias/field/value off a plan node.
+_EXACT_RE = re.compile(r'(?:EXACT\()?(?P<lhs>[\w.]+)\s*(?P<op>>=|<=|=|>|<)\s*'
+                       r'(?:date\s+)?"(?P<rhs>[^"]*)"\)?')
+
+
+def _joined_filters(root: PlanNode, scan: Scan, base_names: set[str]) -> bool:
+    """Does the plan filter (exact or semantic) on a table other than the scanned base?"""
+    for n in walk(root):
+        if isinstance(n, ExactFilter):
+            m = _EXACT_RE.search(n.predicate) if "_EXACT_RE" in globals() else None
+            alias = (m["lhs"].split(".")[0] if m else (n.predicate.split(".")[0] if n.predicate else ""))
+            if alias and alias not in base_names and len(scan.tables) > 1:
+                return True
+        elif isinstance(n, SemanticFilter):
+            src = getattr(n.field, "source", None)
+            if src and src not in base_names and len(scan.tables) > 1:
+                return True
+    return False
+
+
+# When the plan filters on joined tables, retrieve a larger pool so those filters can be
+# applied BEFORE the semantic stage's cap rather than after it (else a court filter would
+# be applied to 15 arbitrary candidates and usually kill them all).
+_POOL_FACTOR = 200  # joins are primary-key reads, so a big pool is cheap; the filter is what is selective
+
+
+def _plan_scan_query(root: PlanNode, scan: Scan, has_text: bool = False) -> list[tuple[str, tuple]]:
     """Turn a dataform Scan into a real SQL query over the JSON-blob store.
 
     The optimizer emits `node.sql` as a relational FROM-fragment (e.g. `document AS doc`)
@@ -260,29 +655,31 @@ def _plan_scan_query(root: PlanNode, scan: Scan) -> tuple[str, tuple]:
     fast and honest: indexed-column EXACT filters, and NOT-NULL on the field a downstream
     SEM will read (no point scanning rows that lack it). Single-table shape only; joins are
     not handled here yet."""
-    table = scan.tables[0]
+    base_table, base_alias = _choose_base(root, scan)
+    table = base_table
     if table not in _TABLE_MODEL:
         raise NotImplementedError(f"{scan.node_id}: no store mapping for table {table!r}")
+    base_names = {base_table, base_alias}
 
     where: list[str] = []
     params: list[Any] = []
     has_semantic = False
+    keywords: list[str] = []
 
     def push(sql: str, ps: tuple) -> None:
-        """Re-apply one deterministic predicate as a store-native WHERE clause.
+        """Push one deterministic predicate, from wherever it now lives.
 
-        Uses the parameterized relational form rather than reparsing the display-only BQL
-        predicate, so strings, numbers and Date literals all arrive already unwrapped."""
+        Parameterised relational form only; the display-only BQL string is never
+        reparsed, so strings, numbers and Date literals all arrive already unwrapped."""
         m = _SQL_CMP.match((sql or "").strip())
-        if (m and m["op"] == "=" and len(ps) == 1
-                and m["lhs"].split(".")[-1] in _INDEXED_COLS):
-            where.append(f'{m["lhs"].split(".")[-1]} = ?')
-            params.append(ps[0])
+        if m and len(ps) == 1 and m["op"] != "!=":
+            _push_exact({"lhs": m["lhs"], "op": m["op"], "rhs": ps[0]},
+                        base_names, scan, base_table, where, params)
 
-    # Predicates the optimizer already absorbed into the Scan. This list is the only
-    # surviving record of them: pushdown *deletes* the ExactFilter nodes, and this backend
-    # ignores scan.sql because the store keeps records as JSON blobs rather than columns.
-    # Reading only the tree below would mean an optimized plan pushes nothing at all.
+    # Predicates the optimizer already absorbed into the Scan. This list is their only
+    # surviving record: pushdown *deletes* the ExactFilter nodes it absorbs, and this
+    # backend ignores scan.sql because the store keeps records as JSON blobs rather than
+    # columns. Reading only the tree below would mean an optimized plan pushes nothing.
     for pp in scan.pushed:
         push(pp.sql, pp.params)
 
@@ -293,16 +690,58 @@ def _plan_scan_query(root: PlanNode, scan: Scan) -> tuple[str, tuple]:
             push(n.sql, n.params)
         elif isinstance(n, SemanticFilter):
             has_semantic = True
-            if n.predicate_class == PredicateClass.SEM and n.field.path:
-                jp = "$." + ".".join(n.field.path)
-                where.append(f"json_extract(data, '{jp}') IS NOT NULL "
-                             f"AND length(json_extract(data, '{jp}')) > 0")
+            src = getattr(n.field, "source", None)
+            on_base = (not src) or (src in base_names) or len(scan.tables) == 1
+            if n.predicate_class == PredicateClass.SEM and n.field.path and on_base:
+                paths = ([tuple(n.field.path)] + list(_TEXT_FALLBACK)
+                         if tuple(n.field.path) in _TEXT_FIELDS else [tuple(n.field.path)])
+                clauses = [f"length(coalesce(json_extract(data, '{_json_path(p)}'), '')) > 0"
+                           for p in dict.fromkeys(paths)]
+                if tuple(n.field.path) in _TEXT_FIELDS:
+                    clauses.append("json_array_length(coalesce(json_extract(data, '$.media.audio'), '[]')) > 0")
+                where.append("(" + " OR ".join(clauses) + ")")
+            if on_base:
+                for k in _keywords(n.text):
+                    if k.lower() not in (x.lower() for x in keywords):
+                        keywords.append(k)
 
-    sql = f"SELECT data FROM {table}"
-    if where:
-        sql += " WHERE " + " AND ".join(where)
-    sql += f" LIMIT {_SCAN_CAP_SEMANTIC if has_semantic else _SCAN_CAP_PLAIN}"
-    return sql, tuple(params)
+    cap = _SCAN_CAP_SEMANTIC if has_semantic else _SCAN_CAP_PLAIN
+    pool = cap * _POOL_FACTOR if _joined_filters(root, scan, base_names) else cap
+    base_where = " AND ".join(where)
+    text_sem = has_text and table == "document" and any(
+        isinstance(n, SemanticFilter) and tuple(n.field.path) in _TEXT_FIELDS
+        and ((getattr(n.field, "source", None) or "") in base_names or len(scan.tables) == 1)
+        for n in walk(root))
+
+    def q(extra: list[str], extra_params: list[Any], via_text: bool = False) -> tuple[str, tuple]:
+        conds = ([base_where] if base_where else []) + extra
+        if via_text:
+            # keyword tier over the opinion text side table, joined back to documents
+            sql = (f"SELECT {table}.data FROM textdb.opinion_text t JOIN {table} "
+                   f"ON {table}.source_system = 'courtlistener' AND {table}.source_id = t.cluster_id")
+        else:
+            sql = f"SELECT data FROM {table}"
+        if conds:
+            sql += " WHERE " + " AND ".join(conds)
+        return sql + f" LIMIT {pool}", tuple(params + extra_params)
+
+    # Tiers, most selective first. Each is capped; _scan merges them by id until `cap`.
+    # Substring match on the JSON blob is a deliberate, index-free retrieval: the corpus
+    # has no FTS, and a bounded LIKE scan is far cheaper than a model call per row.
+    tiers: list[tuple[str, tuple]] = []
+    if has_semantic and keywords:
+        if text_sem:
+            # opinion text first: it is where topical predicates are actually decided
+            if len(keywords) > 1:
+                tiers.append(q(["t.plain_text LIKE ?"] * len(keywords), [f"%{k}%" for k in keywords], via_text=True))
+            for k in keywords[:3]:
+                tiers.append(q(["t.plain_text LIKE ?"], [f"%{k}%"], via_text=True))
+        if len(keywords) > 1:
+            tiers.append(q(["data LIKE ?"] * len(keywords), [f"%{k}%" for k in keywords]))
+        for k in keywords:
+            tiers.append(q(["data LIKE ?"], [f"%{k}%"]))
+    tiers.append(q([], []))
+    return tiers
 
 
 def _scan(node: Scan, ctx: _Ctx) -> list[Row]:
@@ -311,10 +750,52 @@ def _scan(node: Scan, ctx: _Ctx) -> list[Row]:
     Uses the SQL computed by _plan_scan_query (stashed on ctx), not the optimizer's
     relational fragment."""
     t0 = time.perf_counter()
-    model = _TABLE_MODEL.get(node.tables[0], Document)
-    sql, params = ctx.scan_queries.get(node.node_id, (f"SELECT data FROM {node.tables[0]} LIMIT 200", ()))
-    cur = ctx.store.conn.execute(sql, params)
-    rows = [Row(model.model_validate_json(r["data"])) for r in cur.fetchall()]
+    base_table, base_alias = ctx.scan_base.get(node.node_id, (node.tables[0], node.tables[0]))
+    model = _TABLE_MODEL.get(base_table, Document)
+    tiers = ctx.scan_queries.get(node.node_id) or [(f"SELECT data FROM {base_table} LIMIT 200", ())]
+    pool = int(re.search(r"LIMIT (\d+)", tiers[-1][0]).group(1))
+    cap = ctx.scan_cap.get(node.node_id, pool)
+    conn = ctx.store.conn
+
+    # Abort a tier that overruns the retrieval budget; sqlite raises "interrupted".
+    deadline = t0 + _RETRIEVAL_BUDGET_S
+    def _tick() -> int:
+        return 1 if time.perf_counter() > deadline else 0
+    conn.set_progress_handler(_tick, 20000)
+
+    seen: set[str] = set()
+    rows: list[Row] = []
+    try:
+        for i, (sql, params) in enumerate(tiers):
+            if len(rows) >= pool:
+                break
+            last = i == len(tiers) - 1
+            if last:
+                conn.set_progress_handler(None, 0)  # the plain tier always completes
+            try:
+                fetched = conn.execute(sql, params).fetchall()
+            except Exception as e:  # sqlite3.OperationalError: interrupted
+                if "interrupt" in str(e).lower():
+                    continue
+                raise
+            for r in fetched:
+                doc = model.model_validate_json(r["data"])
+                key = doc.envelope.id
+                if key in seen:
+                    continue
+                seen.add(key)
+                rows.append(Row(doc))
+                if len(rows) >= pool:
+                    break
+    finally:
+        conn.set_progress_handler(None, 0)
+
+    if len(node.tables) > 1:
+        _resolve_joins(node, rows, ctx, base=(base_table, base_alias))
+        rows = _prefilter_joined(ctx.plan_root, node, rows, base=(base_table, base_alias))
+    rows = rows[:cap]
+    _hydrate_text(rows, ctx)
+
     ctx.record(_Stage(node.node_id, rows_in=len(rows), rows_out=len(rows),
                       seconds=time.perf_counter() - t0))
     return rows
@@ -349,9 +830,10 @@ def _predicate(node: ExactFilter):
     params = list(node.params)
 
     def field(lhs: str):
-        path = tuple(lhs.split('.')[1:])          # drop the source alias
+        alias, *rest = lhs.split('.')
+        ref = FieldRef(alias, tuple(rest))         # alias-aware: reads a joined entity when bound
         def read(r: Row) -> Any:
-            v = _walk(r.doc, path)
+            v = r.value(ref)
             return getattr(v, 'value', v)
         return read
 
@@ -407,7 +889,7 @@ def _expand(node: Expand, rows: list[Row], ctx: _Ctx) -> list[Row]:
     for r in rows:
         coll = _walk(r.doc, node.field.path) or []
         for el in (coll if isinstance(coll, list) else [coll]):
-            out.append(Row(r.doc, element=el, evidence=list(r.evidence)))
+            out.append(Row(r.doc, element=el, evidence=list(r.evidence), joined=r.joined))
     ctx.record(_Stage(node.node_id, rows_in=len(rows), rows_out=len(out)))
     return out
 
@@ -420,7 +902,7 @@ def _collapse(node: Collapse, rows: list[Row], ctx: _Ctx) -> list[Row]:
         if key in seen:
             continue
         seen.add(key)
-        out.append(Row(r.doc, element=None, evidence=r.evidence))
+        out.append(Row(r.doc, element=None, evidence=r.evidence, joined=r.joined))
     ctx.record(_Stage(node.node_id, rows_in=len(rows), rows_out=len(out)))
     return out
 
@@ -479,7 +961,7 @@ def _project(root: Project, rows: list[Row]) -> list[dict]:
     for r in rows:
         cols = {}
         for c in root.columns:
-            cols[c.label] = _walk(r.doc, c.ref.path) if c.ref else None
+            cols[c.label] = r.value(c.ref) if c.ref else None
         out.append({
             "id": r.doc.envelope.id,
             "columns": cols,
@@ -543,12 +1025,17 @@ def execute(plan: Any, *, db_path: Path | None = None, rows: list[Row] | None = 
     root = _as_plannode(plan)
     store = Store(db_path=db_path) if db_path else Store()
     ctx = _Ctx(store=store)
+    ctx.has_text = _attach_text_db(store)
+    ctx.plan_root = root
 
     # Precompute each Scan's real SQL (pushdowns need the whole pipeline, which a bottom-up
     # walk of a single node can't see).
     for n in walk(root):
         if isinstance(n, Scan) and n.tables and n.tables[0] in _TABLE_MODEL:
-            ctx.scan_queries[n.node_id] = _plan_scan_query(root, n)
+            ctx.scan_base[n.node_id] = _choose_base(root, n)
+            ctx.scan_queries[n.node_id] = _plan_scan_query(root, n, has_text=ctx.has_text)
+            has_sem = any(isinstance(x, SemanticFilter) for x in walk(root))
+            ctx.scan_cap[n.node_id] = _SCAN_CAP_SEMANTIC if has_sem else _SCAN_CAP_PLAIN
 
     async def go() -> list[Row]:
         if rows is not None:

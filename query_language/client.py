@@ -15,6 +15,8 @@ Cost: one HTTP round trip per call.
 """
 from __future__ import annotations
 
+from typing import Any
+
 import json
 import sys
 import time
@@ -189,8 +191,14 @@ def fit_context(messages: list[dict[str, str]], max_tokens: int,
 def chat(messages: list[dict[str, str]], *, model: str | None = None, purpose: str = "",
          temperature: float = TEMPERATURE, max_tokens: int = MAX_TOKENS,
          enable_thinking: bool = ENABLE_THINKING, timeout_s: float = TIMEOUT_S,
-         max_retries: int = MAX_RETRIES) -> ChatResponse:
+         max_retries: int = MAX_RETRIES,
+         reasoning_budget: int | None = None,
+         response_format: dict[str, Any] | None = None) -> ChatResponse:
     """Send one chat completion and return the assistant's text, with its cost measured.
+
+    `reasoning_budget` caps the model's thinking tokens for this call (0 = answer
+    directly); None uses the configured REASONING_BUDGET. `response_format` is passed
+    through to the endpoint (e.g. {"type": "json_object"}) when given.
 
     Nemotron may emit private reasoning deltas before its answer. We time and count that
     trace but never concatenate, keep or print it: `purpose` says which call this was,
@@ -215,9 +223,11 @@ def chat(messages: list[dict[str, str]], *, model: str | None = None, purpose: s
             max_tokens=max_tokens,
             extra_body={
                 "chat_template_kwargs": {"enable_thinking": enable_thinking},
-                "reasoning_budget": REASONING_BUDGET,
+                "reasoning_budget": (REASONING_BUDGET if reasoning_budget is None
+                                     else reasoning_budget),
             },
             stream=True,
+            **({"response_format": response_format} if response_format else {}),
             # Ask for the trailing usage chunk. Without it a streamed response carries no
             # token counts at all, which is why tokens_in/tokens_out used to read 0.
             stream_options={"include_usage": True},

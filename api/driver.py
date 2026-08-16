@@ -247,13 +247,17 @@ def envelope(question: str, reg: Registry, mode: Mode, stages: list[Stage], *,
     return out
 
 def run(question: str, *, schema_name: str | None = None, use_cache: bool = True,
-        max_attempts: int = compiler.MAX_ATTEMPTS) -> dict[str, Any]:
+        max_attempts: int = compiler.MAX_ATTEMPTS, execute: bool = True) -> dict[str, Any]:
     """Route, compile, typecheck, optimize and execute one question. Never raises for a
     bad query.
 
     A stage that cannot run makes the rest `skipped` rather than inventing a result: a
     query that does not typecheck has no meaningful plan, and saying so beats planning
     around it.
+
+    `execute=False` stops after optimize and reports the execute stage as `skipped`, so a
+    caller can show the compiled query and plan first and run the plan separately with
+    `execute_plan()` -- execution is the slow, model-call-per-record part.
     """
     reg = schema.load(schema_name)
     question = ' '.join(question.split())
@@ -295,9 +299,25 @@ def run(question: str, *, schema_name: str | None = None, use_cache: bool = True
                          *skipped(rest[3:], 'no plan: the optimize stage failed')],
                         ok=True, result=result)
 
+    if not execute:
+        return envelope(question, reg, 'compile',
+                        [routed, compiled, checked, planned,
+                         *skipped(rest[3:], 'execution deferred by the caller')],
+                        ok=True, result=result, plan=plan)
+
     executed, results = execute_stage(plan)
     return envelope(question, reg, 'compile', [routed, compiled, checked, planned, executed],
                     ok=True, result=result, plan=plan, results=results)
+
+def execute_plan(plan: dict[str, Any]) -> dict[str, Any]:
+    """Run an already-optimized plan (as returned in an envelope's `plan`) and report the
+    execute stage on its own. The pair `run(..., execute=False)` + `execute_plan(plan)` is
+    exactly one `run(...)`, split at the point where the slow part starts."""
+    executed, results = execute_stage(plan)
+    out: dict[str, Any] = {'ok': executed.status == 'ok', 'stage': executed.json(),
+                           'results': results}
+    if executed.status != 'ok': out['message'] = executed.message
+    return out
 
 def check(wire: Any, reg: Registry) -> tuple[Query | None, list[DecodeError]]:
     """Decode, schema-check and typecheck a hand-written query. Returns (query, errors).
