@@ -25,11 +25,12 @@ function runDurationMs() {
   return Number.isFinite(v) && v > 0 ? v : 10_000;
 }
 
-type View = "query" | "tree" | "json";
+type View = "query" | "tree" | "json" | "bql";
 const VIEWS: { id: View; label: string }[] = [
   { id: "query", label: "Summary" },
   { id: "tree", label: "Tree" },
   { id: "json", label: "JSON" },
+  { id: "bql", label: "BQL" },
 ];
 
 export default function Home() {
@@ -37,6 +38,11 @@ export default function Home() {
   const [submitted, setSubmitted] = useState(false);
   const [compiling, setCompiling] = useState(false);
   const [ast, setAst] = useState<BqlQuery | null>(null);
+  const [bql, setBql] = useState("");
+  const [compilerMeta, setCompilerMeta] = useState<{
+    schema: string;
+    version: string;
+  } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [view, setView] = useState<View>("query");
   // result phase: once we have a plan it "runs" for a bit, then shows a result
@@ -78,11 +84,15 @@ export default function Home() {
     setSubmitted(true);
     setCompiling(true);
     setAst(null);
+    setBql("");
+    setCompilerMeta(null);
     setError(null);
     setResultPhase("idle");
     try {
-      // real compiler if NEXT_PUBLIC_COMPILER_URL is set, dummy ast otherwise
-      setAst(await compileQuery(text));
+      const result = await compileQuery(text);
+      setAst(result.query);
+      setBql(result.bql);
+      setCompilerMeta({ schema: result.schema, version: result.bql_version });
       setResultPhase("running");
       setRun((r) => r + 1);
     } catch (e) {
@@ -200,7 +210,7 @@ export default function Home() {
             actions={
               <div
                 role="tablist"
-                className="flex rounded-xl bg-neutral-100 p-1 text-sm"
+                className="flex max-w-full overflow-x-auto rounded-xl bg-neutral-100 p-1 text-sm"
               >
                 {VIEWS.map((v) => (
                   <button
@@ -209,7 +219,7 @@ export default function Home() {
                     aria-selected={view === v.id}
                     onClick={() => setView(v.id)}
                     className={
-                      "rounded-lg px-3 py-1 transition-colors " +
+                      "whitespace-nowrap rounded-lg px-3 py-1 transition-colors " +
                       (view === v.id
                         ? "bg-white font-medium"
                         : "text-neutral-500 hover:text-neutral-900")
@@ -232,11 +242,20 @@ export default function Home() {
               </p>
             ) : (
               <div key="ready" className="animate-fade-in">
+                {compilerMeta && (
+                  <p className="mb-3 text-[11px] text-neutral-400">
+                    natural language → JSON → BQL · schema {compilerMeta.schema} · AST v{compilerMeta.version}
+                  </p>
+                )}
                 {view === "query" ? (
                   <QueryBrief query={ast} />
                 ) : view === "json" ? (
                   <pre className="overflow-x-auto rounded-xl bg-neutral-50 p-4 font-mono text-[13px] leading-relaxed text-neutral-800">
                     {JSON.stringify(ast, null, 2)}
+                  </pre>
+                ) : view === "bql" ? (
+                  <pre className="overflow-x-auto whitespace-pre-wrap rounded-xl bg-neutral-950 p-4 font-mono text-[13px] leading-relaxed text-neutral-100">
+                    {bql}
                   </pre>
                 ) : (
                   <JsonTree data={ast as unknown as JsonValue} />

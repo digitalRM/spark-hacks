@@ -65,7 +65,7 @@ def resolve_expression(e: Expression, env: Env) -> FieldType:
         case _: raise TypeCheckError(f'Unknown expression: {e!r}')
 
 def check_comparable(op: ComparisonOperator, lt: FieldType, rt: FieldType) -> None:
-    if op != ComparisonOperator.EQ and not isinstance(lt, (IntType, FloatType, TimestampType)):
+    if op not in (ComparisonOperator.EQ, ComparisonOperator.NE) and not isinstance(lt, (IntType, FloatType, TimestampType)):
         raise TypeCheckError(f'Operator {op.value} not supported for {lt!r}')
     if type(lt) != type(rt) and not (
         isinstance(lt, (IntType, FloatType)) and isinstance(rt, (IntType, FloatType))

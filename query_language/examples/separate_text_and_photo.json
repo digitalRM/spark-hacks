@@ -1,0 +1,123 @@
+{
+  "bql_version": "2.0",
+  "schema": "courtlistener",
+  "question": "9th Circuit cases where the opinion discusses body-camera footage and the scanned record contains a photograph.",
+  "query": {
+    "kind": "Query",
+    "select": [
+      {
+        "kind": "FieldRef",
+        "source": "cluster",
+        "path": [
+          "id"
+        ]
+      },
+      {
+        "kind": "FieldRef",
+        "source": "cluster",
+        "path": [
+          "case_name"
+        ]
+      }
+    ],
+    "source": {
+      "kind": "Join",
+      "condition": {
+        "kind": "Comparison",
+        "op": "=",
+        "field1": {
+          "kind": "FieldRef",
+          "source": "opinion",
+          "path": [
+            "cluster_id"
+          ]
+        },
+        "field2": {
+          "kind": "FieldRef",
+          "source": "cluster",
+          "path": [
+            "id"
+          ]
+        }
+      },
+      "left": {
+        "kind": "Join",
+        "condition": {
+          "kind": "Comparison",
+          "op": "=",
+          "field1": {
+            "kind": "FieldRef",
+            "source": "cluster",
+            "path": [
+              "docket_id"
+            ]
+          },
+          "field2": {
+            "kind": "FieldRef",
+            "source": "docket",
+            "path": [
+              "id"
+            ]
+          }
+        },
+        "left": {
+          "kind": "TableRef",
+          "name": "cluster",
+          "alias": "cluster"
+        },
+        "right": {
+          "kind": "TableRef",
+          "name": "docket",
+          "alias": "docket"
+        }
+      },
+      "right": {
+        "kind": "TableRef",
+        "name": "opinion",
+        "alias": "opinion"
+      }
+    },
+    "where": {
+      "kind": "And",
+      "children": [
+        {
+          "kind": "Comparison",
+          "op": "=",
+          "field1": {
+            "kind": "FieldRef",
+            "source": "docket",
+            "path": [
+              "court_id"
+            ]
+          },
+          "field2": "ca9"
+        },
+        {
+          "kind": "Fuzzy",
+          "field": {
+            "kind": "FieldRef",
+            "source": "opinion",
+            "path": [
+              "plain_text"
+            ]
+          },
+          "text": "body-camera footage"
+        },
+        {
+          "kind": "Fuzzy",
+          "field": {
+            "kind": "FieldRef",
+            "source": "cluster",
+            "path": [
+              "scan_pages"
+            ]
+          },
+          "text": "contains a photograph"
+        }
+      ]
+    },
+    "group_by": [],
+    "limit": 10
+  },
+  "printed": "select cluster.id, cluster.case_name\nfrom ((cluster as cluster join docket as docket on cluster.docket_id = docket.id) join opinion as opinion on opinion.cluster_id = cluster.id)\nwhere (docket.court_id = \"ca9\" and fuzzy(opinion.plain_text, \"body-camera footage\") and fuzzy(cluster.scan_pages, \"contains a photograph\"))\nlimit 10"
+}

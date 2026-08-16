@@ -1,0 +1,154 @@
+{
+  "bql_version": "2.0",
+  "schema": "courtlistener",
+  "question": "Ninth Circuit cases, not unpublished, where either a judge asked at oral argument whether the right was clearly established or the opinion holds the officer is entitled to qualified immunity, and which do not discuss municipal liability.",
+  "query": {
+    "kind": "Query",
+    "select": [
+      {
+        "kind": "FieldRef",
+        "source": "cluster",
+        "path": [
+          "id"
+        ]
+      },
+      {
+        "kind": "FieldRef",
+        "source": "cluster",
+        "path": [
+          "case_name"
+        ]
+      }
+    ],
+    "source": {
+      "kind": "Join",
+      "condition": {
+        "kind": "Comparison",
+        "op": "=",
+        "field1": {
+          "kind": "FieldRef",
+          "source": "opinion",
+          "path": [
+            "cluster_id"
+          ]
+        },
+        "field2": {
+          "kind": "FieldRef",
+          "source": "cluster",
+          "path": [
+            "id"
+          ]
+        }
+      },
+      "left": {
+        "kind": "Join",
+        "condition": {
+          "kind": "Comparison",
+          "op": "=",
+          "field1": {
+            "kind": "FieldRef",
+            "source": "cluster",
+            "path": [
+              "docket_id"
+            ]
+          },
+          "field2": {
+            "kind": "FieldRef",
+            "source": "docket",
+            "path": [
+              "id"
+            ]
+          }
+        },
+        "left": {
+          "kind": "TableRef",
+          "name": "cluster",
+          "alias": "cluster"
+        },
+        "right": {
+          "kind": "TableRef",
+          "name": "docket",
+          "alias": "docket"
+        }
+      },
+      "right": {
+        "kind": "TableRef",
+        "name": "opinion",
+        "alias": "opinion"
+      }
+    },
+    "where": {
+      "kind": "And",
+      "children": [
+        {
+          "kind": "Comparison",
+          "op": "=",
+          "field1": {
+            "kind": "FieldRef",
+            "source": "docket",
+            "path": [
+              "court_id"
+            ]
+          },
+          "field2": "ca9"
+        },
+        {
+          "kind": "Comparison",
+          "op": "!=",
+          "field1": {
+            "kind": "FieldRef",
+            "source": "cluster",
+            "path": [
+              "precedential_status"
+            ]
+          },
+          "field2": "Unpublished"
+        },
+        {
+          "kind": "Or",
+          "children": [
+            {
+              "kind": "Fuzzy",
+              "field": {
+                "kind": "FieldRef",
+                "source": "docket",
+                "path": [
+                  "argument"
+                ]
+              },
+              "text": "a judge asked whether the right was clearly established"
+            },
+            {
+              "kind": "Fuzzy",
+              "field": {
+                "kind": "FieldRef",
+                "source": "opinion",
+                "path": [
+                  "plain_text"
+                ]
+              },
+              "text": "the officer is entitled to qualified immunity"
+            }
+          ]
+        },
+        {
+          "kind": "Not",
+          "child": {
+            "kind": "Fuzzy",
+            "field": {
+              "kind": "FieldRef",
+              "source": "opinion",
+              "path": [
+                "plain_text"
+              ]
+            },
+            "text": "municipal liability"
+          }
+        }
+      ]
+    },
+    "group_by": [],
+    "limit": 10
+  },
+  "printed": "select cluster.id, cluster.case_name\nfrom ((cluster as cluster join docket as docket on cluster.docket_id = docket.id) join opinion as opinion on opinion.cluster_id = cluster.id)\nwhere (docket.court_id = \"ca9\" and cluster.precedential_status != \"Unpublished\" and (fuzzy(docket.argument, \"a judge asked whether the right was clearly established\") or fuzzy(opinion.plain_text, \"the officer is entitled to qualified immunity\")) and not fuzzy(opinion.plain_text, \"municipal liability\"))\nlimit 10"
+}

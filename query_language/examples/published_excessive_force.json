@@ -1,0 +1,138 @@
+{
+  "bql_version": "2.0",
+  "schema": "courtlistener",
+  "question": "Published 9th or 10th Circuit decisions since 2020 that discuss excessive force.",
+  "query": {
+    "kind": "Query",
+    "select": [
+      {
+        "kind": "FieldRef",
+        "source": "cluster",
+        "path": [
+          "id"
+        ]
+      },
+      {
+        "kind": "FieldRef",
+        "source": "cluster",
+        "path": [
+          "case_name"
+        ]
+      }
+    ],
+    "source": {
+      "kind": "Join",
+      "condition": {
+        "kind": "Comparison",
+        "op": "=",
+        "field1": {
+          "kind": "FieldRef",
+          "source": "opinion",
+          "path": [
+            "cluster_id"
+          ]
+        },
+        "field2": {
+          "kind": "FieldRef",
+          "source": "cluster",
+          "path": [
+            "id"
+          ]
+        }
+      },
+      "left": {
+        "kind": "Join",
+        "condition": {
+          "kind": "Comparison",
+          "op": "=",
+          "field1": {
+            "kind": "FieldRef",
+            "source": "cluster",
+            "path": [
+              "docket_id"
+            ]
+          },
+          "field2": {
+            "kind": "FieldRef",
+            "source": "docket",
+            "path": [
+              "id"
+            ]
+          }
+        },
+        "left": {
+          "kind": "TableRef",
+          "name": "cluster",
+          "alias": "cluster"
+        },
+        "right": {
+          "kind": "TableRef",
+          "name": "docket",
+          "alias": "docket"
+        }
+      },
+      "right": {
+        "kind": "TableRef",
+        "name": "opinion",
+        "alias": "opinion"
+      }
+    },
+    "where": {
+      "kind": "And",
+      "children": [
+        {
+          "kind": "InList",
+          "field": {
+            "kind": "FieldRef",
+            "source": "docket",
+            "path": [
+              "court_id"
+            ]
+          },
+          "values": [
+            "ca9",
+            "ca10"
+          ]
+        },
+        {
+          "kind": "Comparison",
+          "op": "=",
+          "field1": {
+            "kind": "FieldRef",
+            "source": "cluster",
+            "path": [
+              "precedential_status"
+            ]
+          },
+          "field2": "Published"
+        },
+        {
+          "kind": "Comparison",
+          "op": ">=",
+          "field1": {
+            "kind": "FieldRef",
+            "source": "cluster",
+            "path": [
+              "date_filed"
+            ]
+          },
+          "field2": "2020-01-01"
+        },
+        {
+          "kind": "Fuzzy",
+          "field": {
+            "kind": "FieldRef",
+            "source": "opinion",
+            "path": [
+              "plain_text"
+            ]
+          },
+          "text": "excessive force by police officers"
+        }
+      ]
+    },
+    "group_by": [],
+    "limit": 10
+  },
+  "printed": "select cluster.id, cluster.case_name\nfrom ((cluster as cluster join docket as docket on cluster.docket_id = docket.id) join opinion as opinion on opinion.cluster_id = cluster.id)\nwhere (docket.court_id in (\"ca9\", \"ca10\") and cluster.precedential_status = \"Published\" and cluster.date_filed >= \"2020-01-01\" and fuzzy(opinion.plain_text, \"excessive force by police officers\"))\nlimit 10"
+}

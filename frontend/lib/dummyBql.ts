@@ -1,10 +1,9 @@
 import type { BqlQuery, FieldRef } from "@/lib/bql";
 
-// placeholder compiled-bql ast untill the compiler backend is wired up
 export const DUMMY_QUERY =
   "9th Circuit qualified-immunity cases citing Graham v. Connor, where the scanned record contains a photographic exhibit, and a judge expressed skepticism at oral argument.";
 
-/** example searches cycled thru the input placeholder */
+/** Example searches cycled through the input placeholder. */
 export const EXAMPLE_QUERIES = [
   DUMMY_QUERY,
   "Second Circuit securities-fraud opinions since 2020 that reversed a motion to dismiss.",
@@ -14,105 +13,44 @@ export const EXAMPLE_QUERIES = [
   "Federal district court orders granting class certification in wage-and-hour cases.",
 ];
 
-const f = (source: string, column: string): FieldRef => ({
-  type: "field_ref",
+const field = (source: string, ...path: string[]): FieldRef => ({
+  kind: "FieldRef",
   source,
-  column,
+  path,
 });
 
-/**
- * same wire shape `query_language/serialize.py` emits for `grammar.example()`, but
- * hitting the whole grammar: nested joins, comparisons, between / in-list, multi-field fuzzy, nested `not (a or b)`
- */
+/** Canonical AST v2 fixture retained for isolated visual development and tests. */
 export const DUMMY_BQL_AST: BqlQuery = {
-  select: [f("cluster", "id"), f("cluster", "case_name")],
+  kind: "Query",
+  select: [field("cluster", "id"), field("cluster", "case_name")],
   source: {
-    type: "join",
+    kind: "Join",
     condition: {
-      type: "comparison",
+      kind: "Comparison",
       op: "=",
-      field1: f("citation", "citing_opinion_id"),
-      field2: f("opinion", "id"),
+      field1: field("cluster", "docket_id"),
+      field2: field("docket", "id"),
     },
-    left: {
-      type: "join",
-      condition: {
-        type: "comparison",
-        op: "=",
-        field1: f("opinion", "cluster_id"),
-        field2: f("cluster", "id"),
-      },
-      left: {
-        type: "join",
-        condition: {
-          type: "comparison",
-          op: "=",
-          field1: f("cluster", "docket_id"),
-          field2: f("docket", "id"),
-        },
-        left: "cluster",
-        right: "docket",
-      },
-      right: "opinion",
-    },
-    right: "citation",
+    left: { kind: "TableRef", name: "cluster", alias: "cluster" },
+    right: { kind: "TableRef", name: "docket", alias: "docket" },
   },
   where: {
-    type: "and",
+    kind: "And",
     children: [
       {
-        type: "comparison",
+        kind: "Comparison",
         op: "=",
-        field1: f("docket", "court_id"),
+        field1: field("docket", "court_id"),
         field2: "ca9",
       },
       {
-        type: "comparison",
-        op: "=",
-        field1: f("citation", "cited_cite"),
-        field2: "490 U.S. 386",
-      },
-      {
-        type: "between",
-        field: f("cluster", "date_filed"),
-        low: "2015-01-01",
-        high: "2024-12-31",
-      },
-      {
-        type: "fuzzy",
-        field: [f("opinion", "plain_text")],
-        text: "qualified immunity for excessive force",
-      },
-      {
-        type: "fuzzy",
-        field: [f("cluster", "scan_pages")],
+        kind: "Fuzzy",
+        field: field("cluster", "scan_pages"),
         text: "contains a photographic exhibit",
-      },
-      {
-        type: "fuzzy",
-        field: [f("docket", "argument"), f("docket", "argument_transcript")],
-        text: "a judge expressed skepticism",
-      },
-      {
-        type: "not",
-        child: {
-          type: "or",
-          children: [
-            {
-              type: "in_list",
-              field: f("cluster", "precedential_status"),
-              values: ["Unpublished", "Errata"],
-            },
-            {
-              type: "like",
-              field: f("cluster", "case_name"),
-              pattern: "%In re%",
-            },
-          ],
-        },
       },
     ],
   },
+  group_by: [],
   limit: 10,
 };
 

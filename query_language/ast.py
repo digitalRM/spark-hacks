@@ -30,6 +30,7 @@ class ComparisonOperator(Enum):
     LT = '<'
     LE = '<='
     EQ = '='
+    NE = '!='
     GT = '>'
     GE = '>='
 

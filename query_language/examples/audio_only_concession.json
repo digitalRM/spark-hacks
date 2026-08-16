@@ -1,0 +1,72 @@
+{
+  "bql_version": "2.0",
+  "schema": "courtlistener",
+  "question": "Second Circuit oral arguments from 2023 where counsel conceded a point under questioning.",
+  "query": {
+    "kind": "Query",
+    "select": [
+      {
+        "kind": "FieldRef",
+        "source": "docket",
+        "path": [
+          "id"
+        ]
+      },
+      {
+        "kind": "FieldRef",
+        "source": "docket",
+        "path": [
+          "case_name"
+        ]
+      }
+    ],
+    "source": {
+      "kind": "TableRef",
+      "name": "docket",
+      "alias": "docket"
+    },
+    "where": {
+      "kind": "And",
+      "children": [
+        {
+          "kind": "Comparison",
+          "op": "=",
+          "field1": {
+            "kind": "FieldRef",
+            "source": "docket",
+            "path": [
+              "court_id"
+            ]
+          },
+          "field2": "ca2"
+        },
+        {
+          "kind": "Between",
+          "field": {
+            "kind": "FieldRef",
+            "source": "docket",
+            "path": [
+              "date_filed"
+            ]
+          },
+          "low": "2023-01-01",
+          "high": "2023-12-31"
+        },
+        {
+          "kind": "Fuzzy",
+          "field": {
+            "kind": "FieldRef",
+            "source": "docket",
+            "path": [
+              "argument"
+            ]
+          },
+          "text": "counsel conceded a point under questioning"
+        }
+      ]
+    },
+    "group_by": [],
+    "limit": 10
+  },
+  "printed": "select docket.id, docket.case_name\nfrom docket as docket\nwhere (docket.court_id = \"ca2\" and docket.date_filed between \"2023-01-01\" and \"2023-12-31\" and fuzzy(docket.argument, \"counsel conceded a point under questioning\"))\nlimit 10"
+}

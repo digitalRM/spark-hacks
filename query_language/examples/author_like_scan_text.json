@@ -1,0 +1,85 @@
+{
+  "bql_version": "2.0",
+  "schema": "courtlistener",
+  "question": "Opinions by Judge Berzon whose scanned record cites Graham v. Connor.",
+  "query": {
+    "kind": "Query",
+    "select": [
+      {
+        "kind": "FieldRef",
+        "source": "opinion",
+        "path": [
+          "id"
+        ]
+      },
+      {
+        "kind": "FieldRef",
+        "source": "opinion",
+        "path": [
+          "author_str"
+        ]
+      }
+    ],
+    "source": {
+      "kind": "Join",
+      "condition": {
+        "kind": "Comparison",
+        "op": "=",
+        "field1": {
+          "kind": "FieldRef",
+          "source": "opinion",
+          "path": [
+            "cluster_id"
+          ]
+        },
+        "field2": {
+          "kind": "FieldRef",
+          "source": "cluster",
+          "path": [
+            "id"
+          ]
+        }
+      },
+      "left": {
+        "kind": "TableRef",
+        "name": "cluster",
+        "alias": "cluster"
+      },
+      "right": {
+        "kind": "TableRef",
+        "name": "opinion",
+        "alias": "opinion"
+      }
+    },
+    "where": {
+      "kind": "And",
+      "children": [
+        {
+          "kind": "Like",
+          "field": {
+            "kind": "FieldRef",
+            "source": "opinion",
+            "path": [
+              "author_str"
+            ]
+          },
+          "pattern": "%Berzon%"
+        },
+        {
+          "kind": "Fuzzy",
+          "field": {
+            "kind": "FieldRef",
+            "source": "cluster",
+            "path": [
+              "scan_text"
+            ]
+          },
+          "text": "cites Graham v. Connor"
+        }
+      ]
+    },
+    "group_by": [],
+    "limit": 10
+  },
+  "printed": "select opinion.id, opinion.author_str\nfrom (cluster as cluster join opinion as opinion on opinion.cluster_id = cluster.id)\nwhere (opinion.author_str like \"%Berzon%\" and fuzzy(cluster.scan_text, \"cites Graham v. Connor\"))\nlimit 10"
+}

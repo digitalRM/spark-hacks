@@ -1,6 +1,9 @@
 import {
   fieldKey,
+  fieldRefFor,
+  isAggregator,
   isFieldRef,
+  isUnnest,
   sourceTables,
   type BqlQuery,
   type Comparison,
@@ -11,12 +14,7 @@ import {
   type Literal,
 } from "@/lib/bql";
 
-/* ---------------------------------------- */
-/* dictionaries - friendly names. everything has a fallback so an unknown */
-/* table / field / value still renders (just more literally)               */
-/* ---------------------------------------- */
-
-/** friendly names for the tables the query touches */
+/** Friendly names have literal fallbacks, so new schema fields remain renderable. */
 export const TABLE_LABELS: Record<string, string> = {
   cluster: "Cases",
   docket: "Dockets",
@@ -24,9 +22,14 @@ export const TABLE_LABELS: Record<string, string> = {
   citation: "Citations",
   audio: "Oral arguments",
   scan: "Scanned records",
+  document: "Documents",
+  proceeding: "Proceedings",
+  organization: "Organizations",
+  person: "People",
+  position: "Positions",
+  financial_disclosure: "Financial disclosures",
 };
 
-/** friendly field names, keyed by `table.column` */
 const FIELD_LABELS: Record<string, string> = {
   "docket.court_id": "Court",
   "citation.cited_cite": "Cites",
@@ -42,17 +45,24 @@ const FIELD_LABELS: Record<string, string> = {
   "docket.date_terminated": "Date terminated",
   "opinion.author": "Author",
   "opinion.type": "Opinion type",
+  "doc.envelope.id": "Document ID",
+  "doc.envelope.source_system": "Source system",
+  "doc.title": "Title",
+  "doc.media.text.plain_text": "Document text",
+  "doc.media.images": "Document images",
+  "doc.media.audio": "Document audio",
 };
 
-/** verb used when a text field is matched by meaning */
 const FIELD_VERBS: Record<string, string> = {
   "opinion.plain_text": "discusses",
   "cluster.scan_pages": "contains",
   "docket.argument": "includes",
   "docket.argument_transcript": "includes",
+  "doc.media.text.plain_text": "discusses",
+  "doc.media.images": "contains",
+  "doc.media.audio": "includes",
 };
 
-/** connector for `=` on this field, default "is". empty when the label already reads like a verb */
 const EQUALS_CONNECTORS: Record<string, string> = {
   "citation.cited_cite": "",
 };
@@ -80,14 +90,8 @@ const KNOWN_CITATIONS: Record<string, string> = {
   "509 U.S. 579": "Daubert v. Merrell Dow",
 };
 
-/* ---------------------------------------- */
-/* field / value humanizing                 */
-/* ---------------------------------------- */
-
 export function fieldLabel(key: string) {
-  return (
-    FIELD_LABELS[key] ?? key.split(".").pop()?.replace(/_/g, " ") ?? key
-  );
+  return FIELD_LABELS[key] ?? key.split(".").pop()?.replace(/_/g, " ") ?? key;
 }
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -96,41 +100,43 @@ const MONTHS = "Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec".split(" ");
 function isDateField(key: string) {
   return /date|filed|decided|terminated|argued/i.test(key.split(".").pop() ?? "");
 }
-function isDateValue(v: Literal) {
-  return typeof v === "string" && ISO_DATE.test(v);
+
+function isDateValue(value: Literal) {
+  return typeof value === "string" && ISO_DATE.test(value);
 }
+
 function formatDate(iso: string) {
-  const [y, m, d] = iso.split("-").map(Number);
-  return `${MONTHS[m - 1]} ${d}, ${y}`;
+  const [year, month, day] = iso.split("-").map(Number);
+  return `${MONTHS[month - 1]} ${day}, ${year}`;
 }
 
-export function humanizeValue(key: string, v: Literal): string {
-  if (typeof v === "boolean") return v ? "yes" : "no";
-  if (typeof v === "number") return String(v);
-  if (key === "docket.court_id") return COURT_NAMES[v] ?? v.toUpperCase();
+export function humanizeValue(key: string, value: Literal): string {
+  if (typeof value === "boolean") return value ? "yes" : "no";
+  if (typeof value === "number") return String(value);
+  if (key === "docket.court_id") return COURT_NAMES[value] ?? value.toUpperCase();
   if (key === "citation.cited_cite") {
-    const name = KNOWN_CITATIONS[v];
-    return name ? `${name}, ${v}` : v;
+    const name = KNOWN_CITATIONS[value];
+    return name ? `${name}, ${value}` : value;
   }
-  if (isDateValue(v)) return formatDate(v);
-  return v;
+  if (isDateValue(value)) return formatDate(value);
+  return value;
 }
 
-function humanizeExpression(e: Expression): string {
-  return isFieldRef(e) ? fieldLabel(fieldKey(e)) : humanizeValue("", e);
+function humanizeExpression(expression: Expression): string {
+  if (isFieldRef(expression)) return fieldLabel(fieldKey(expression));
+  if (isUnnest(expression)) return `each ${fieldLabel(fieldKey(expression.ref))}`;
+  if (isAggregator(expression)) {
+    const argument = expression.arg ? humanizeExpression(expression.arg) : "all rows";
+    return `${expression.op} of ${argument}`;
+  }
+  return humanizeValue("", expression);
 }
-
-/* ---------------------------------------- */
-/* conditions -> criteria tree              */
-/* ---------------------------------------- */
 
 export type Leaf = {
   kind: "leaf";
-  label: string; // e.g. "Court"
-  /** word(s) between label and value: "is", "is before", "discusses", "" ... */
+  label: string;
   connector: string;
-  value: string; // e.g. "Ninth Circuit"
-  /** quote the value (free text) instead of treating it as a name/number */
+  value: string;
   quote: boolean;
   exact: boolean;
 };
@@ -143,6 +149,7 @@ const FLIP: Record<ComparisonOp, ComparisonOp> = {
   "<": ">",
   "<=": ">=",
   "=": "=",
+  "!=": "!=",
   ">": "<",
   ">=": "<=",
 };
@@ -151,6 +158,8 @@ function comparisonWords(op: ComparisonOp, dateLike: boolean, key: string) {
   switch (op) {
     case "=":
       return EQUALS_CONNECTORS[key] ?? "is";
+    case "!=":
+      return "is not";
     case "<":
       return dateLike ? "is before" : "is less than";
     case "<=":
@@ -162,65 +171,62 @@ function comparisonWords(op: ComparisonOp, dateLike: boolean, key: string) {
   }
 }
 
-function describeComparison(c: Comparison): Criterion {
-  let { op, field1: a, field2: b } = c;
-  // normalise so the FieldRef sits on the left when theres exactly one
-  if (!isFieldRef(a) && isFieldRef(b)) {
-    [a, b] = [b, a];
+function describeComparison(comparison: Comparison): Criterion {
+  let { op, field1: left, field2: right } = comparison;
+  if (!isFieldRef(left) && isFieldRef(right)) {
+    [left, right] = [right, left];
     op = FLIP[op];
   }
-  if (isFieldRef(a) && isFieldRef(b)) {
-    // field-to-field (mostly join conditions)
+  if (isFieldRef(left) && isFieldRef(right)) {
     return {
       kind: "leaf",
-      label: fieldLabel(fieldKey(a)),
+      label: fieldLabel(fieldKey(left)),
       connector: op === "=" ? "matches" : `is ${op}`,
-      value: fieldLabel(fieldKey(b)),
+      value: fieldLabel(fieldKey(right)),
       quote: false,
       exact: true,
     };
   }
-  if (isFieldRef(a)) {
-    const key = fieldKey(a);
-    const lit = b as Literal;
-    const dateLike = isDateField(key) || isDateValue(lit);
+  if (isFieldRef(left) && !isFieldRef(right) && !isUnnest(right) && !isAggregator(right)) {
+    const key = fieldKey(left);
+    const dateLike = isDateField(key) || isDateValue(right);
     return {
       kind: "leaf",
       label: fieldLabel(key),
       connector: comparisonWords(op, dateLike, key),
-      value: humanizeValue(key, lit),
+      value: humanizeValue(key, right),
       quote: false,
       exact: true,
     };
   }
-  // literal-vs-literal: wierd, but render something sensible
   return {
     kind: "leaf",
-    label: humanizeExpression(a),
+    label: humanizeExpression(left),
     connector: op,
-    value: humanizeExpression(b),
+    value: humanizeExpression(right),
     quote: false,
     exact: true,
   };
 }
 
-function joinList(items: string[], conj: "or" | "and") {
+function joinList(items: string[], conjunction: "or" | "and") {
   if (items.length <= 1) return items.join("");
-  if (items.length === 2) return `${items[0]} ${conj} ${items[1]}`;
-  return `${items.slice(0, -1).join(", ")}, ${conj} ${items[items.length - 1]}`;
+  if (items.length === 2) return `${items[0]} ${conjunction} ${items[1]}`;
+  return `${items.slice(0, -1).join(", ")}, ${conjunction} ${items.at(-1)}`;
 }
 
-/** sql like -> plain words */
 function describeLike(field: FieldRef, pattern: string): Leaf {
   const key = fieldKey(field);
   const starts = pattern.startsWith("%");
   const ends = pattern.endsWith("%");
   const core = pattern.replace(/^%+|%+$/g, "").replace(/%/g, "…");
-  let connector: string;
-  if (starts && ends) connector = "contains";
-  else if (ends) connector = "starts with";
-  else if (starts) connector = "ends with";
-  else connector = "matches";
+  const connector = starts && ends
+    ? "contains"
+    : ends
+      ? "starts with"
+      : starts
+        ? "ends with"
+        : "matches";
   return {
     kind: "leaf",
     label: fieldLabel(key),
@@ -231,98 +237,81 @@ function describeLike(field: FieldRef, pattern: string): Leaf {
   };
 }
 
-/** recursively describe any condition. never throws - unknown shapes become `Unknown` */
-export function describeCondition(c: Condition): Criterion {
-  switch (c?.type) {
-    case "comparison":
-      return describeComparison(c);
-    case "in_list": {
-      const key = fieldKey(c.field);
+/** Recursively describe any canonical v2 condition. */
+export function describeCondition(condition: Condition): Criterion {
+  switch (condition.kind) {
+    case "Comparison":
+      return describeComparison(condition);
+    case "InList": {
+      const key = fieldKey(condition.field);
       return {
         kind: "leaf",
         label: fieldLabel(key),
         connector: "is one of",
-        value: joinList(
-          c.values.map((v) => humanizeValue(key, v)),
-          "or",
-        ),
+        value: joinList(condition.values.map((value) => humanizeValue(key, value)), "or"),
         quote: false,
         exact: true,
       };
     }
-    case "between": {
-      const key = fieldKey(c.field);
+    case "Between": {
+      const key = fieldKey(condition.field);
       return {
         kind: "leaf",
         label: fieldLabel(key),
         connector: "is between",
-        value: `${humanizeValue(key, c.low)} and ${humanizeValue(key, c.high)}`,
+        value: `${humanizeValue(key, condition.low)} and ${humanizeValue(key, condition.high)}`,
         quote: false,
         exact: true,
       };
     }
-    case "like":
-      return describeLike(c.field, c.pattern);
-    case "fuzzy": {
-      const keys = c.field.map(fieldKey);
-      const verb = FIELD_VERBS[keys[0]] ?? "mentions";
-      let value = c.text;
-      // avoid "contains 'contains a ...'" when the phrase already starts with the verb
+    case "Like":
+      return describeLike(condition.field, condition.pattern);
+    case "Fuzzy": {
+      const ref = fieldRefFor(condition.field);
+      const key = ref ? fieldKey(ref) : "content";
+      const verb = FIELD_VERBS[key] ?? "mentions";
       const lead = new RegExp(`^${verb}\\s+`, "i");
-      if (lead.test(value)) value = value.replace(lead, "");
+      const value = lead.test(condition.text) ? condition.text.replace(lead, "") : condition.text;
       return {
         kind: "leaf",
-        label: joinList(keys.map(fieldLabel), "or"),
+        label: fieldLabel(key),
         connector: verb,
         value,
         quote: true,
         exact: false,
       };
     }
-    case "and":
-    case "or":
+    case "And":
+    case "Or":
       return {
         kind: "group",
-        op: c.type === "and" ? "all" : "any",
-        children: c.children.map(describeCondition),
+        op: condition.kind === "And" ? "all" : "any",
+        children: condition.children.map(describeCondition),
       };
-    case "not":
-      return { kind: "not", child: describeCondition(c.child) };
-    default:
-      return { kind: "unknown", raw: JSON.stringify(c) };
+    case "Not":
+      return { kind: "not", child: describeCondition(condition.child) };
   }
 }
 
-/* ---------------------------------------- */
-/* query-level helpers                      */
-/* ---------------------------------------- */
-
-/** top-level criteria list. a top-level and/or gets flattened into its children (op reported); anything else is a 1-item list */
-export function topLevelCriteria(q: BqlQuery): {
+export function topLevelCriteria(query: BqlQuery): {
   op: "all" | "any";
   items: Criterion[];
 } {
-  if (!q.where) return { op: "all", items: [] };
-  const root = describeCondition(q.where);
+  if (!query.where) return { op: "all", items: [] };
+  const root = describeCondition(query.where);
   if (root.kind === "group") return { op: root.op, items: root.children };
   return { op: "all", items: [root] };
 }
 
-/** which tables the query draws on */
-export function tablesUsed(q: BqlQuery) {
-  return sourceTables(q.source);
+export function tablesUsed(query: BqlQuery) {
+  return sourceTables(query.source);
 }
 
-/** friendly labels for selected columns (literals rendered as-is) */
-export function selectedLabels(q: BqlQuery): string[] {
-  return q.select.map((e) =>
-    isFieldRef(e) ? fieldLabel(fieldKey(e)) : humanizeValue("", e),
-  );
+export function selectedLabels(query: BqlQuery): string[] {
+  return query.select.map(humanizeExpression);
 }
 
-/** what kind of thing comes back - from the first selected table */
-export function resultNoun(q: BqlQuery): string {
-  const first = q.select.find(isFieldRef);
-  const table = first?.source ?? sourceTables(q.source)[0];
+export function resultNoun(query: BqlQuery): string {
+  const table = sourceTables(query.source)[0];
   return (table && TABLE_LABELS[table]?.toLowerCase()) || "results";
 }

@@ -130,7 +130,7 @@ export default function QueryBrief({ query }: { query: BqlQuery }) {
   const { op, items } = topLevelCriteria(query);
   const columns = selectedLabels(query);
   const noun = resultNoun(query);
-  const hasFuzzy = JSON.stringify(query.where ?? {}).includes('"fuzzy"');
+  const hasFuzzy = JSON.stringify(query.where ?? {}).includes('"Fuzzy"');
 
   return (
     <div className="flex flex-col gap-6">

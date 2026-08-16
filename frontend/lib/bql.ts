@@ -1,85 +1,114 @@
-/**
- * ts mirror of the bql ast in `query_language/grammar.py`, in the json wire format
- * from `query_language/serialize.py`. keep in sync!
- * every dataclass = object tagged w/ a snake_case `type`; literals are plain json scalars; tuples are arrays
- */
+/** Canonical BQL AST v2 JSON wire format from query_language/serde.py. */
 
 export type Literal = string | number | boolean;
 
-export type FieldRef = { type: "field_ref"; source: string; column: string };
-export type Expression = FieldRef | Literal;
+export type FieldRef = {
+  kind: "FieldRef";
+  source: string;
+  path: string[];
+};
 
-export type ComparisonOp = "<" | "<=" | "=" | ">" | ">=";
+export type Unnest = { kind: "Unnest"; ref: FieldRef };
+
+export type Aggregator = {
+  kind: "Aggregator";
+  op: "count" | "sum" | "avg" | "min" | "max";
+  arg: Expression | null;
+};
+
+export type Expression = Literal | FieldRef | Unnest | Aggregator;
+
+export type ComparisonOp = "<" | "<=" | "=" | "!=" | ">" | ">=";
 export type Comparison = {
-  type: "comparison";
+  kind: "Comparison";
   op: ComparisonOp;
   field1: Expression;
   field2: Expression;
 };
-export type InList = { type: "in_list"; field: FieldRef; values: Literal[] };
+
+export type InList = { kind: "InList"; field: FieldRef; values: Literal[] };
 export type Between = {
-  type: "between";
+  kind: "Between";
   field: FieldRef;
   low: Literal;
   high: Literal;
 };
-export type Like = { type: "like"; field: FieldRef; pattern: string };
-export type Exact = Comparison | InList | Between | Like;
+export type Like = { kind: "Like"; field: FieldRef; pattern: string };
+export type Fuzzy = { kind: "Fuzzy"; field: FieldRef | Unnest; text: string };
+export type And = { kind: "And"; children: Condition[] };
+export type Or = { kind: "Or"; children: Condition[] };
+export type Not = { kind: "Not"; child: Condition };
+export type Condition = Comparison | InList | Between | Like | Fuzzy | And | Or | Not;
 
-/** semantic match over one or more fields */
-export type Fuzzy = { type: "fuzzy"; field: FieldRef[]; text: string };
-
-export type And = { type: "and"; children: Condition[] };
-export type Or = { type: "or"; children: Condition[] };
-export type Not = { type: "not"; child: Condition };
-
-export type Condition = Exact | Fuzzy | And | Or | Not;
-
+export type TableRef = { kind: "TableRef"; name: string; alias: string };
 export type Join = {
-  type: "join";
-  condition: Condition;
+  kind: "Join";
+  condition: Comparison;
   left: Source;
   right: Source;
 };
-export type Source = string | Join;
+export type Source = TableRef | Join;
 
 export type BqlQuery = {
+  kind: "Query";
   select: Expression[];
   source: Source;
   where: Condition | null;
+  group_by: Expression[];
   limit: number | null;
 };
 
-// ---- helpers ----
-
-export function isFieldRef(e: unknown): e is FieldRef {
+export function isFieldRef(value: unknown): value is FieldRef {
   return (
-    typeof e === "object" &&
-    e !== null &&
-    (e as { type?: unknown }).type === "field_ref"
+    typeof value === "object" &&
+    value !== null &&
+    (value as { kind?: unknown }).kind === "FieldRef"
   );
 }
 
-export function isJoin(s: Source): s is Join {
-  return typeof s === "object" && s !== null && s.type === "join";
+export function isUnnest(value: unknown): value is Unnest {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    (value as { kind?: unknown }).kind === "Unnest"
+  );
 }
 
-/** `table.column` for a FieldRef */
-export function fieldKey(f: FieldRef) {
-  return `${f.source}.${f.column}`;
+export function isAggregator(value: unknown): value is Aggregator {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    (value as { kind?: unknown }).kind === "Aggregator"
+  );
 }
 
-/** every base table a source tree references, left-to-right, deduped */
-export function sourceTables(s: Source): string[] {
-  const out: string[] = [];
-  const walk = (x: Source) => {
-    if (isJoin(x)) {
-      walk(x.left);
-      walk(x.right);
-    } else if (!out.includes(x)) {
-      out.push(x);
+export function isJoin(value: Source): value is Join {
+  return value.kind === "Join";
+}
+
+/** Alias-qualified nested field path, for example doc.media.text.plain_text. */
+export function fieldKey(field: FieldRef): string {
+  return [field.source, ...field.path].join(".");
+}
+
+/** Extract the underlying field from direct and element-grain expressions. */
+export function fieldRefFor(expression: Expression): FieldRef | null {
+  if (isFieldRef(expression)) return expression;
+  if (isUnnest(expression)) return expression.ref;
+  return null;
+}
+
+/** Every physical table referenced by a source tree, left-to-right, deduplicated. */
+export function sourceTables(source: Source): string[] {
+  const tables: string[] = [];
+  const walk = (node: Source) => {
+    if (isJoin(node)) {
+      walk(node.left);
+      walk(node.right);
+    } else if (!tables.includes(node.name)) {
+      tables.push(node.name);
     }
   };
-  walk(s);
-  return out;
+  walk(source);
+  return tables;
 }
