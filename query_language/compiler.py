@@ -557,6 +557,7 @@ def compile_question(question: str, *, registry: schema.Registry | None = None,
 
     for attempt in range(1, max_attempts + 1):
         temperature = INITIAL_TEMPERATURE if attempt == 1 else REPAIR_TEMPERATURE
+        print('sending from comp-hilaire')
         resp = send(messages, model=mdl, temperature=temperature)
         obj, parse_error = extract_json(resp.text)
         if parse_error is not None:

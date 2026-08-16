@@ -117,6 +117,7 @@ def classify(question: str, *, chat_fn: ChatFn | None = None) -> RelevanceResult
         return RelevanceResult(route != "reject", "mock:relevance", route=route)
 
     send = chat_fn or client.chat
+    print('sending from relevance')
     response = send(
         [
             {"role": "system", "content": SYSTEM_PROMPT},

@@ -47,21 +47,22 @@ LOCAL_MODELS: dict[str, tuple[int, str]] = {
 
 # Hosted compiler. Preserve this exact model id unless explicitly overridden.
 SUPER_MODEL = os.environ.get("SUPER_MODEL", "nvidia/nemotron-3-super-120b-a12b")
+LIGHTNING_MODEL = "nvidia/nemotron-3.5-lightning"
 
 # NL -> BQL. Runs once per question and sees only the question and the schema, never
 # any case data: the compiler is data-free by construction.
 #
 # Super is much stronger at structured output and runs on NVIDIA's hosted endpoint.
-COMPILER_MODEL = os.environ.get("COMPILER_MODEL", SUPER_MODEL)
-FALLBACK_COMPILER_MODEL = os.environ.get("FALLBACK_COMPILER_MODEL", COMPILER_MODEL)
+COMPILER_MODEL = os.environ.get("COMPILER_MODEL", LIGHTNING_MODEL)
+FALLBACK_COMPILER_MODEL = os.environ.get("FALLBACK_COMPILER_MODEL", LIGHTNING_MODEL)
 # Cheap local gate that runs before the hosted compiler sees a question.
-RELEVANCE_MODEL = os.environ.get("RELEVANCE_MODEL", "nvidia/nemotron-3.5-lightning")
+RELEVANCE_MODEL = os.environ.get("RELEVANCE_MODEL", LIGHTNING_MODEL)
 
 # How much context to ask for. Ollama defaults to 4096 whatever the model supports,
 # and silently truncates the front of an over-long prompt, so we always say.
 NUM_CTX = int(os.environ.get("BQL_NUM_CTX", "16384"))
 CONTEXT_TOKENS = int(os.environ.get("BQL_CONTEXT_TOKENS", "32768"))
-MAX_TOKENS = int(os.environ.get("BQL_MAX_TOKENS", "16384"))
+MAX_TOKENS = int(os.environ.get("BQL_MAX_TOKENS", "2048"))
 TIMEOUT_S = float(os.environ.get("BQL_TIMEOUT_S", "300"))
 MAX_RETRIES = int(os.environ.get("BQL_MAX_RETRIES", "3"))
 DEFAULT_TEMPERATURE = float(os.environ.get("BQL_TEMPERATURE", "1"))
@@ -217,17 +218,24 @@ def chat(messages: list[dict[str, str]], *, model: str | None = None,
 
     Cost: one round trip, or free under BQL_MOCK=1.
     """
+    print("BEGINNING CHAT CALL to " + (model or COMPILER_MODEL))
+
     model = model or COMPILER_MODEL
     thinking = ENABLE_THINKING if enable_thinking is None else enable_thinking
     if is_mock():
         return ChatResponse(text=_mock_reply(messages), model=f"mock:{model}", mock=True)
 
     messages, dropped = fit_context(messages, max_tokens)
-    if not is_local(model):
-        return _hosted_chat(messages, model=model, temperature=temperature,
+    if True:
+        print("GETTING HOSTED CHAT")
+        answer = _hosted_chat(messages, model=model, temperature=temperature,
                             max_tokens=max_tokens, base_url=base_url,
                             dropped=dropped, enable_thinking=thinking,
                             timeout_s=timeout_s, max_retries=max_retries)
+        print('HOSTED GOOD!')
+        return answer
+
+    print("GETTING LOCAL MODEL??")
 
     ollama = api_for(model) == OLLAMA and base_url is None
     if ollama:
@@ -249,13 +257,20 @@ def chat(messages: list[dict[str, str]], *, model: str | None = None,
         }
     else:
         url = f"{(base_url or base_url_for(model)).rstrip('/')}/chat/completions"
+        print("URL BEING HIT IS " + url)
+        print(f'messages = {messages}')
+        print(f'temperature = {temperature}')
+        print(f'top_p = {TOP_P}')
+        print(f'max_tokens = {max_tokens}')
+        print(f'thinking = {thinking}')
+
         payload = {
             "model": model,
             "messages": messages,
             "temperature": temperature,
             "top_p": TOP_P,
             "max_tokens": max_tokens,
-            "stream": False,
+            "stream": True,
             "chat_template_kwargs": {"enable_thinking": thinking},
         }
     body = json.dumps(payload).encode()
@@ -265,12 +280,18 @@ def chat(messages: list[dict[str, str]], *, model: str | None = None,
     last: Exception | None = None
     for attempt in range(1, max_retries + 1):
         t0 = time.perf_counter()
+        print(f"t0 = {t0}")
         try:
+            print("in request block")
             req = urllib.request.Request(url, data=body, headers=headers, method="POST")
+            print('making request!!!')
             with urllib.request.urlopen(req, timeout=timeout_s) as resp:
+                print('got request!!')
                 data = json.loads(resp.read().decode())
-            return _response(data, model, ollama, dropped,
+            answer = _response(data, model, ollama, dropped,
                              (time.perf_counter() - t0) * 1000)
+            print("ENDING CHAT CALL")
+            return answer
         except urllib.error.HTTPError as e:
             detail = e.read().decode()[:500]
             if e.code in (400, 401, 403, 404):  # bad key, bad model id, bad request
@@ -279,6 +300,7 @@ def chat(messages: list[dict[str, str]], *, model: str | None = None,
         except (urllib.error.URLError, TimeoutError, KeyError, json.JSONDecodeError) as e:
             last = ModelError(f"{type(e).__name__}: {e}")
         if attempt < max_retries:
+            print('sleeping wtf')
             time.sleep(min(2.0 ** attempt * 0.5, 8.0))
     raise ModelError(f"{model} failed after {max_retries} attempts at {url}: {last}")
 
@@ -306,6 +328,7 @@ def _hosted_chat(messages: list[dict[str, str]], *, model: str, temperature: flo
     receive exactly the final JSON content.
     """
     endpoint = (base_url or base_url_for(model)).rstrip("/")
+    print(f'{endpoint=}, {model=}, {temperature=}, {max_tokens=}, {enable_thinking=}')
     try:
         sdk = _load_openai()(
             base_url=endpoint,
@@ -337,6 +360,7 @@ def _hosted_chat(messages: list[dict[str, str]], *, model: str, temperature: flo
             text = getattr(delta, "content", None)
             if text is not None:
                 content.append(text)
+        print(f'sad = {(time.perf_counter() - t0) * 1000}')
         return ChatResponse(
             text="".join(content).strip(), model=model,
             latency_ms=(time.perf_counter() - t0) * 1000,

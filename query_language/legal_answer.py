@@ -39,6 +39,7 @@ def answer_question(question: str, *, chat_fn: ChatFn | None = None) -> client.C
             mock=True,
         )
     send = chat_fn or client.chat
+    print('sending from legal-answer')
     response = send(
         [
             {"role": "system", "content": SYSTEM_PROMPT},
