@@ -1,10 +1,17 @@
 import type { BqlQuery } from "@/lib/bql";
 
-const API_URL = process.env.NEXT_PUBLIC_AMICUS_API_URL ?? "http://127.0.0.1:8000";
+/**
+ * Where the Python API lives. Set once in the repo-root `.env` as `AMICUS_API_URL`;
+ * `scripts/web.sh` exports it into this process as `NEXT_PUBLIC_AMICUS_API_URL`, which
+ * Next inlines into the browser bundle. Nothing secret ever passes through here.
+ */
+const API_URL = (
+  process.env.NEXT_PUBLIC_AMICUS_API_URL ?? "http://127.0.0.1:8000"
+).replace(/\/$/, "");
 
-/** One stage of the pipeline. `stub` means the module behind that seam is not written yet. */
+/** One stage of the pipeline. `stub` means the module behind that stage is not written yet. */
 export type Stage = {
-  name: "relevance" | "compile" | "typecheck" | "optimize" | "execute";
+  name: "relevance" | "answer" | "compile" | "typecheck" | "optimize" | "execute";
   status: "ok" | "failed" | "stub" | "skipped";
   ms: number;
   message?: string;
@@ -27,7 +34,7 @@ export type CompiledSearchEnvelope = {
   warnings?: string[];
 };
 
-/** Lightning routed this to Super instead: a legal question BQL cannot express. */
+/** The router sent this straight to Super: a legal question BQL cannot express. */
 export type LegalAnswerEnvelope = {
   mode: "answer";
   ok: boolean;
@@ -66,8 +73,8 @@ function isCompiledSearch(payload: unknown): payload is CompiledSearchEnvelope {
  * direct legal answer from Super.
  *
  * Talks to `api/server.py` directly; there is no Next route in between, so the API
- * must be running (`.venv/bin/python -m api.server`) and its CORS origins must
- * include this one. A rejected or failed request comes back as 422 with a `message`.
+ * must be running (`scripts/api.sh`) and its CORS origins must include this one.
+ * A rejected or failed request comes back as 422 with a `message`.
  */
 export async function compileQuery(
   question: string,
@@ -75,7 +82,7 @@ export async function compileQuery(
 ): Promise<CompileEnvelope> {
   let response: Response;
   try {
-    response = await fetch(`${API_URL.replace(/\/$/, "")}/compile`, {
+    response = await fetch(`${API_URL}/compile`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ question }),

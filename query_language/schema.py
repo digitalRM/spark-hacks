@@ -25,10 +25,11 @@ from __future__ import annotations
 
 import difflib
 import json
-import os
 from dataclasses import dataclass, field as dc_field
 from pathlib import Path
 from typing import Any
+
+import config
 
 SCHEMA_DIR = Path(__file__).resolve().parent / "schemas"
 
@@ -207,10 +208,10 @@ _CACHE: dict[str, Registry] = {}
 def load(name_or_path: str | Path | None = None) -> Registry:
     """Load a schema by name ("courtlistener") or path. Cached per resolved path.
 
-    Resolution order: the argument, then $AMICUS_SCHEMA, then "courtlistener".
+    Resolution order: the argument, then config.SCHEMA ($AMICUS_SCHEMA).
     Cost: one file read the first time, free afterwards.
     """
-    target = name_or_path or os.environ.get("AMICUS_SCHEMA") or "courtlistener"
+    target = name_or_path or config.SCHEMA
     path = Path(target)
     if not path.suffix:
         path = SCHEMA_DIR / f"{target}.json"

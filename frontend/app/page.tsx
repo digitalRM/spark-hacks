@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, KeyboardEvent, useEffect, useRef, useState } from "react";
-import JsonTree from "@/components/JsonTree";
+import JsonTree, { type JsonValue } from "@/components/JsonTree";
 import QueryBrief, { SearchedAcross } from "@/components/QueryBrief";
 import NotchedPanel from "@/components/NotchedPanel";
 import BackgroundLines from "@/components/BackgroundLines";
@@ -11,7 +11,7 @@ import TextShader from "@/components/TextShader";
 import CompileShader from "@/components/CompileShader";
 import ThinkingLabel from "@/components/ThinkingLabel";
 import AutoHeight from "@/components/AutoHeight";
-import { EXAMPLE_QUERIES, type JsonValue } from "@/lib/dummyBql";
+import { EXAMPLE_QUERIES } from "@/lib/examples";
 import type { BqlQuery } from "@/lib/bql";
 import { compileQuery } from "@/lib/compile";
 import { runQuery } from "@/lib/runQuery";
@@ -65,7 +65,7 @@ export default function Home() {
     if (!ast) return;
     const ctrl = new AbortController();
     let t: number | undefined;
-    // real runtime if NEXT_PUBLIC_RUNTIME_URL is set; dummy results after the
+    // real runtime if NEXT_PUBLIC_AMICUS_RUNTIME_URL is set; dummy results after the
     // placeholder run time otherwise
     runQuery(ast, { signal: ctrl.signal, fallbackMs: runDurationMs() })
       .then((res) => {

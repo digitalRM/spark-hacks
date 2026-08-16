@@ -5,16 +5,17 @@ import { DUMMY_RESULTS } from "@/lib/dummyResults";
 /**
  * Execute a compiled query on the runtime.
  *
- * If `NEXT_PUBLIC_RUNTIME_URL` is set, POSTs `{ query }` (the BQL wire JSON) to
- * `${NEXT_PUBLIC_RUNTIME_URL}/run` and expects a `RunResponse` whose file
- * entries are URLs served by the DGX Spark. Otherwise waits `fallbackMs` and
- * returns bundled dummy results so the UI flow can be exercised.
+ * Set `AMICUS_RUNTIME_URL` in the repo-root `.env` (exported here as
+ * `NEXT_PUBLIC_AMICUS_RUNTIME_URL` by `scripts/web.sh`) and this POSTs `{ query }` —
+ * the BQL wire JSON — to `${url}/run`, expecting a `RunResponse` whose file entries
+ * are URLs served by the DGX Spark. Unset, it waits `fallbackMs` and returns the
+ * bundled fixtures, because `runtime/executor.py` is still a stub.
  */
 export async function runQuery(
   query: BqlQuery,
   { signal, fallbackMs = 10_000 }: { signal?: AbortSignal; fallbackMs?: number } = {},
 ): Promise<RunResponse> {
-  const base = process.env.NEXT_PUBLIC_RUNTIME_URL;
+  const base = process.env.NEXT_PUBLIC_AMICUS_RUNTIME_URL;
   if (!base) {
     await new Promise<void>((resolve, reject) => {
       const t = setTimeout(resolve, fallbackMs);

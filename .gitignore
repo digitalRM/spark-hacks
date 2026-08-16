@@ -5,3 +5,5 @@
 .DS_Store
 .venv/
 data_ingestion/data/
+# The real configuration. .env.example is the checked-in template.
+.env

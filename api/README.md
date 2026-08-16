@@ -4,59 +4,55 @@ The pipeline, and the only HTTP surface. The frontend talks to this directly; th
 no Next.js route in between.
 
 ```text
-question ──[compile]──▶ BQL AST ──[typecheck]──▶ schema-resolved query
-         ──[optimize]─▶ ExecutionPlan ──[execute]──▶ results + telemetry
+question ──[route]──▶ reject | answer | compile
+           compile ──▶ BQL AST ──[typecheck]──▶ schema-resolved query
+                   ──▶ ExecutionPlan ──[execute]──▶ results + telemetry
 ```
 
 | file | holds |
 |---|---|
-| `driver.py` | all pipeline logic — stages, seams, the envelope |
+| `driver.py` | all pipeline logic — routing, stages, the envelope |
 | `cli.py` | argparse over `driver`, no logic of its own |
 | `server.py` | FastAPI over `driver`, no logic of its own |
 
 ## Run
 
 ```bash
-python3 -m venv .venv
-.venv/bin/python -m pip install -r requirements.txt
-.venv/bin/python -m api.server
+scripts/api.sh
 ```
 
 ```bash
-BQL_MOCK=1 .venv/bin/python -m api.cli compile "9th Circuit cases with a photo in the record"
+AMICUS_MOCK=1 .venv/bin/python -m api.cli compile "9th Circuit cases with a photo in the record"
 ```
 
-`BQL_MOCK=1` makes the compiler deterministic and offline. Compiler and model
-configuration (`NVIDIA_API_KEY`, `COMPILER_MODEL`, `AMICUS_SCHEMA`, …) is read by this
-process — see the table in `query_language/README.md`.
-
-| variable | default |
-|---|---|
-| `AMICUS_HOST` / `AMICUS_PORT` | `127.0.0.1` / `8000` |
-| `AMICUS_CORS_ORIGINS` | `http://localhost:3000` |
+`AMICUS_MOCK=1` makes the router and compiler deterministic and offline. Everything
+else is configured in the repo-root `.env` and read through `config.py`; see
+`.env.example`, or run `python -m api.cli config` to print what this process resolved.
 
 ## Endpoints
 
 | route | does |
 |---|---|
-| `POST /compile` | `{question, schema?}` → envelope. 200 compiled, 422 did not |
+| `POST /compile` | `{question, schema?}` → envelope. 200 answered, 422 did not |
 | `POST /check` | `{query}` → decode + schema-check + typecheck, no model call |
 | `GET /schema` | the schema as the compiler renders it into the prompt |
 | `GET /health` | which stages are live and which are still stubs |
 
-## Stages and seams
+## The envelope
 
-Compile and typecheck are live. Optimize and execute are **seams**: `driver` imports them
-lazily and reports `stub` until the module exists, so the pipeline stays runnable while
-they are being written.
+`mode` is the discriminant, and it comes straight from the router:
 
-| stage | module | must export |
-|---|---|---|
-| optimize | `optimizer/optimizer.py` | `optimize(ast, schema) -> plan`, `to_json(plan) -> dict` |
-| execute | `runtime/executor.py` | `execute(plan) -> dict` |
+| mode | shape |
+|---|---|
+| `compile` | `query` (AST v2 wire JSON), `bql`, `plan`, `results` |
+| `answer` | `answer` — prose from Super; no query, no plan |
+| `reject` | `message` — nothing downstream ran |
 
-A stub module declares `STUB = True` so `/health` can tell "exists" from "implemented"
-without calling it. Delete that line when the module does the work.
+`ok` means the question produced an answer: a compiled query or direct prose. It says
+nothing about the later stages, and it must not start failing the day the executor
+lands and errors on a hard query — a typecheck, optimize or execute failure is
+reported on its own stage, not on `ok`.
 
-`ok` on the envelope reports the **compile** stage only. That is what the frontend gates
-on, and it must not start failing the day the executor lands and errors on a hard query.
+`stages` reports every stage in order with `status` in `ok | failed | stub | skipped`.
+`stub` means the module behind it is not written yet (today: `runtime/executor.py`);
+`skipped` means an earlier stage made it meaningless.

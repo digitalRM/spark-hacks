@@ -1,4 +1,4 @@
-"""Step 3 — natural language to a BQL query, via Nemotron.
+"""Step 3 — natural language to a BQL query, via hosted Nemotron Super.
 
 What makes this a compiler and not a prompt is the VALIDATE-REPAIR LOOP. The model
 writes JSON; we decode it against the canonical `ast.py` and check it against the schema,
@@ -13,37 +13,36 @@ The output is JSON in the encoding `serde.py` defines, which is a faithful
 serialization of the dataclasses in `ast.py`. `.query` is the wire form to
 hand downstream; `.ast` is the same thing decoded.
 
+Routing is not this module's job. `relevance.py` decides whether a question is a
+record search at all, and `api/driver.py` acts on that decision; by the time
+`compile_question` is called the answer is yes.
+
 Cost: zero on a cache hit, otherwise 1-3 round trips, once per question.
 """
 from __future__ import annotations
 
 import hashlib
 import json
-import os
 import re
 import time
 from dataclasses import dataclass, field as dc_field
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
-from . import checks, client, legal_answer, relevance, schema, serde
+import config
+
+from . import checks, client, schema, serde
 from .ast import (Aggregator, AggregatorOp, And, Between, Comparison,
                   ComparisonOperator as Op, FieldRef, Fuzzy, InList, Join, Like,
                   Not, Or, Query, TableRef, Unnest)
 from .serde import BQL_VERSION, DecodeError
 
-MAX_ATTEMPTS = int(os.environ.get("BQL_MAX_ATTEMPTS", "3"))
-# Match the hosted Nemotron Super generation settings by default while leaving both
-# phases independently configurable for production tuning.
-INITIAL_TEMPERATURE = client.DEFAULT_TEMPERATURE
-REPAIR_TEMPERATURE = float(os.environ.get(
-    "BQL_REPAIR_TEMPERATURE", str(client.DEFAULT_TEMPERATURE)))
-CACHE_DIR = Path(os.environ.get("BQL_CACHE_DIR", Path(__file__).resolve().parent / "cache"))
+MAX_ATTEMPTS = 3
+# The repair turns run at the same temperature as the first: the model is being handed
+# exact error paths, not asked to explore.
+TEMPERATURE = client.TEMPERATURE
+CACHE_DIR = Path(__file__).resolve().parent / "cache"
 EXAMPLES_DIR = Path(__file__).resolve().parent / "examples"
-
-ChatFn = Callable[..., client.ChatResponse]
-RelevanceFn = Callable[[str], relevance.RelevanceResult]
-AnswerFn = Callable[[str], client.ChatResponse]
 
 
 @dataclass
@@ -59,9 +58,6 @@ class CompileResult:
     schema_name: str = ""
     cached: bool = False
     latency_ms: float = 0.0
-    is_legal: bool = True
-    relevance_model: str = ""
-    answer: str | None = None
     # Parts of the question the language cannot express. The query is still valid;
     # it just answers something narrower than what was asked.
     warnings: list[str] = dc_field(default_factory=list)
@@ -72,41 +68,9 @@ class CompileResult:
         from .ast import pp_query
         return pp_query(self.ast).strip() if self.ast else ""
 
-    def envelope(self) -> dict[str, Any]:
-        """A compiled-search or direct-answer success response."""
-        if not self.ok:
-            raise ValueError("cannot build an envelope from a failed compile")
-        if self.answer is not None:
-            return {
-                "mode": "answer", "is_legal": True,
-                "question": self.question, "answer": self.answer,
-                "model": self.model,
-            }
-        if self.query is None:
-            raise ValueError("successful compile has neither a query nor an answer")
-        envelope = {"bql_version": BQL_VERSION, "schema": self.schema_name,
-                    "mode": "compile",
-                    "is_legal": self.is_legal,
-                    "question": self.question, "query": self.query,
-                    "bql": self.printed}
-        if self.warnings:
-            envelope["warnings"] = list(self.warnings)
-        return envelope
-
-    def error_report(self) -> dict[str, Any]:
-        """A structured failure, safe to return over HTTP or show in a UI."""
-        return {"ok": False,
-                "mode": "reject" if not self.is_legal else "compile",
-                "stage": "relevance" if not self.is_legal else "compile",
-                "is_legal": self.is_legal, "question": self.question,
-                "message": self.message(), "errors": list(self.errors),
-                "warnings": list(self.warnings), "attempts": self.attempts}
-
     def message(self) -> str:
         if self.ok:
             return "ok"
-        if not self.is_legal:
-            return relevance.REJECTION_MESSAGE
         if not self.errors:
             return "the compiler produced no query"
         head = "; ".join(str(e) for e in self.errors[:3])
@@ -120,18 +84,6 @@ class CompileResult:
             return (f"this question asks for something BQL cannot express yet — "
                     f"{self.warnings[0]} The compiler then failed: {failed}")
         return failed
-
-    def to_dict(self) -> dict[str, Any]:
-        return {"ok": self.ok, "is_legal": self.is_legal,
-                "mode": ("answer" if self.answer is not None else
-                         "reject" if not self.is_legal else "compile"),
-                "question": self.question, "query": self.query,
-                "bql": self.printed, "printed": self.printed,
-                "answer": self.answer,
-                "errors": list(self.errors), "attempts": self.attempts,
-                "model": self.model, "schema": self.schema_name, "cached": self.cached,
-                "relevance_model": self.relevance_model,
-                "warnings": list(self.warnings), "latency_ms": round(self.latency_ms, 1)}
 
 
 # --------------------------------------------------------------------------- #
@@ -414,9 +366,8 @@ _THINK = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
 # Both patterns are deliberately narrow. A false positive here is a confusing note
 # on a correct query, so anything ambiguous is left out: " per " is not a signal,
 # because "per curiam" is everywhere in case law.
-_CANNOT_EXPRESS: list[tuple[str, re.Pattern[str], str]] = [
-    ("ordering",
-     re.compile(r"\b(most recent|latest|newest|oldest|earliest|"
+_CANNOT_EXPRESS: list[tuple[re.Pattern[str], str]] = [
+    (re.compile(r"\b(most recent|latest|newest|oldest|earliest|"
                 r"sorted by|ranked by|in order of|chronological)\b", re.I),
      "BQL has no ORDER BY yet, so any LIMIT returns an arbitrary subset rather than "
      "the first ones by the order you asked for."),
@@ -425,7 +376,7 @@ _CANNOT_EXPRESS: list[tuple[str, re.Pattern[str], str]] = [
 
 def cannot_express(question: str) -> list[str]:
     """Warnings for parts of a question the language has no way to say. Free."""
-    return [message for _, pattern, message in _CANNOT_EXPRESS if pattern.search(question)]
+    return [message for pattern, message in _CANNOT_EXPRESS if pattern.search(question)]
 
 
 def extract_json(text: str) -> tuple[dict | None, str | None]:
@@ -492,9 +443,6 @@ def check_payload(obj: Any, registry: schema.Registry) -> tuple[Query | None, li
 # --------------------------------------------------------------------------- #
 def compile_question(question: str, *, registry: schema.Registry | None = None,
                      use_cache: bool = True, model: str | None = None,
-                     chat_fn: ChatFn | None = None,
-                     relevance_fn: RelevanceFn | None = None,
-                     answer_fn: AnswerFn | None = None,
                      max_attempts: int = MAX_ATTEMPTS) -> CompileResult:
     """Compile a question into a BQL query. Never raises for a bad model answer.
 
@@ -503,43 +451,12 @@ def compile_question(question: str, *, registry: schema.Registry | None = None,
     records every round trip. A transport failure (no key, endpoint down) does
     raise, because that is an operator problem rather than a query problem.
 
-    Cost: one small local routing call, then either one direct Super answer, zero
-    calls on a query-cache hit, or 1..max_attempts hosted compiler calls.
+    Cost: zero calls on a cache hit, otherwise 1..max_attempts compiler calls.
     """
     t0 = time.perf_counter()
     reg = registry or schema.load()
-    send = chat_fn or client.chat
+    mdl = model or config.MODEL
     question = " ".join(question.split())
-
-    # An injected compiler chat function is a unit-test/replay boundary and is
-    # already preclassified unless the caller injects a relevance function too.
-    if relevance_fn is not None:
-        decision = relevance_fn(question)
-    elif chat_fn is not None:
-        decision = relevance.RelevanceResult(True, "preclassified")
-    else:
-        decision = relevance.classify(question)
-    if not decision.is_legal:
-        return CompileResult(
-            ok=False, question=question, model=decision.model,
-            schema_name=reg.name, is_legal=False,
-            relevance_model=decision.model,
-            latency_ms=(time.perf_counter() - t0) * 1000,
-        )
-
-    if decision.route == "answer":
-        response = (answer_fn(question) if answer_fn is not None
-                    else legal_answer.answer_question(question))
-        return CompileResult(
-            ok=True, question=question, answer=response.text.strip(),
-            model=response.model, schema_name=reg.name, is_legal=True,
-            relevance_model=decision.model,
-            latency_ms=(time.perf_counter() - t0) * 1000,
-        )
-
-    # Resolve the compiler only after Lightning approves the domain. An injected
-    # chat function is a test/replay and should never trigger a server probe.
-    mdl = model or (client.COMPILER_MODEL if chat_fn else client.resolve_compiler_model())
 
     if use_cache:
         hit = load_cached(question, reg.name)
@@ -548,7 +465,6 @@ def compile_question(question: str, *, registry: schema.Registry | None = None,
             if not errors and ast is not None:
                 return CompileResult(ok=True, question=question, query=hit, ast=ast,
                                      model="cache", schema_name=reg.name, cached=True,
-                                     relevance_model=decision.model,
                                      latency_ms=(time.perf_counter() - t0) * 1000)
 
     messages = build_messages(question, reg)
@@ -556,8 +472,7 @@ def compile_question(question: str, *, registry: schema.Registry | None = None,
     errors: list[DecodeError] = []
 
     for attempt in range(1, max_attempts + 1):
-        temperature = INITIAL_TEMPERATURE if attempt == 1 else REPAIR_TEMPERATURE
-        resp = send(messages, model=mdl, temperature=temperature)
+        resp = client.chat(messages, model=mdl, temperature=TEMPERATURE)
         obj, parse_error = extract_json(resp.text)
         if parse_error is not None:
             ast, errors = None, [DecodeError("$", "invalid_json", parse_error)]
@@ -568,13 +483,11 @@ def compile_question(question: str, *, registry: schema.Registry | None = None,
                          "errors": list(errors), "tokens_in": resp.tokens_in,
                          "tokens_out": resp.tokens_out, "latency_ms": round(resp.latency_ms, 1),
                          "dropped_shots": resp.dropped_shots,
-                         "temperature": temperature,
                          "raw": resp.text[:2000]})
 
         if not errors and ast is not None:
             result = CompileResult(ok=True, question=question, query=serde.encode(ast), ast=ast,
                                    attempts=attempts, model=resp.model, schema_name=reg.name,
-                                   relevance_model=decision.model,
                                    warnings=cannot_express(question),
                                    latency_ms=(time.perf_counter() - t0) * 1000)
             if use_cache:
@@ -587,7 +500,6 @@ def compile_question(question: str, *, registry: schema.Registry | None = None,
 
     return CompileResult(ok=False, question=question, errors=errors, attempts=attempts,
                          model=mdl, schema_name=reg.name,
-                         relevance_model=decision.model,
                          warnings=cannot_express(question),
                          latency_ms=(time.perf_counter() - t0) * 1000)
 
@@ -618,13 +530,19 @@ def load_cached(question: str, schema_name: str) -> dict | None:
 
 
 def save_cached(result: CompileResult) -> Path | None:
-    """Write a successful compile to the cache. Best effort; never fails a compile."""
+    """Write a successful compile to the cache. Best effort; never fails a compile.
+
+    Same shape as the checked-in `examples/*.json`, so a cache entry can be promoted to
+    an example by moving the file.
+    """
     if not result.ok or result.query is None:
         return None
+    entry = {"bql_version": BQL_VERSION, "schema": result.schema_name,
+             "question": result.question, "query": result.query, "bql": result.printed}
     try:
         CACHE_DIR.mkdir(parents=True, exist_ok=True)
         path = CACHE_DIR / f"{cache_key(result.question, result.schema_name)}.json"
-        path.write_text(json.dumps(result.envelope(), indent=2) + "\n")
+        path.write_text(json.dumps(entry, indent=2) + "\n")
         return path
     except OSError:
         return None

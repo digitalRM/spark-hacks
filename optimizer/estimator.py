@@ -24,7 +24,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol
 
-from query_language.ast import FieldRef
 from optimizer.funnel import Funnel, StageMetrics
 from optimizer.plan import (
     Aggregate, Collapse, ExactFilter, Expand, Limit, Materialize, PlanNode,

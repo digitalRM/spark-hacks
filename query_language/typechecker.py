@@ -6,9 +6,9 @@ from .ast import (
 from .type_system import (
     TextType, ImageType, AudioType, TimestampType,
     IntType, FloatType, BoolType,
-    ModalType, NumericType,
+    ModalType,
     ArrayType, SequenceType, OptionalType,
-    FieldType, ObjectType, Schema,
+    FieldType, Schema,
 )
 
 type Env = dict[str, FieldType]
@@ -79,7 +79,7 @@ def check_condition(c: Condition, env: Env) -> None:
         case InList(field, vals):
             ft = resolve_field_ref(field.source, field.path, env)
             for v in vals: check_comparable(ComparisonOperator.EQ, ft, resolve_expression(v, env))
-        case Between(field, lo, hi):
+        case Between(field, _, _):
             ft = resolve_field_ref(field.source, field.path, env)
             if not isinstance(ft, (IntType, FloatType, TimestampType)):
                 raise TypeCheckError(f'between requires numeric/timestamp field, got {ft!r}')

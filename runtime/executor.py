@@ -1,7 +1,7 @@
 """Stage 5 -- execute an ExecutionPlan against the corpus. Not built yet.
 
-`api.driver` imports this lazily and reports the execute stage as `stub` for as long as
-`execute` raises NotImplementedError, so the rest of the pipeline stays runnable. Filling
+`api.driver` reports the execute stage as `stub` for as long as `execute` raises
+NotImplementedError, so the rest of the pipeline stays runnable. Filling
 it in means dispatching every plan node through one ExecutionContext protocol with three
 backend families behind it -- relational (compile the node to SQL), bespoke (rasterize,
 segment, vector search, blocking) and semantic (invoke a model) -- and recording items in,
@@ -15,7 +15,8 @@ from __future__ import annotations
 
 from typing import Any
 
-# Read by api.driver.seam_status. Delete this line when `execute` actually executes.
+# Read by GET /health, so it can say `stub` without calling the executor to find out.
+# Delete this line when `execute` actually executes.
 STUB = True
 
 def execute(plan: Any) -> dict[str, Any]:

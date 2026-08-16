@@ -1,14 +1,15 @@
 """HTTP in front of api.driver.
 
-    .venv/bin/python -m api.server            # 0.0.0.0:8000
+    scripts/api.sh                            # or: .venv/bin/python -m api.server
 
     POST /compile   {"question": "...", "schema": "courtlistener"}  -> envelope
     POST /check     {"query": {...}}                                -> validation only
     GET  /schema                                                    -> what the model is told
-    GET  /health                                                    -> which seams are live
+    GET  /health                                                    -> which stages are live
 
 Thin by construction: each handler is one driver call plus a status code. Anything that
-looks like pipeline logic belongs in api/driver.py instead.
+looks like pipeline logic belongs in api/driver.py instead. Every setting comes from
+config.py, which reads the repo-root .env.
 
 A compile that fails returns 422 with the same envelope shape as a success, so a caller
 parses one thing. Only an operator problem -- schema missing, body unparseable -- returns
@@ -16,13 +17,14 @@ parses one thing. Only an operator problem -- schema missing, body unparseable -
 """
 from __future__ import annotations
 
-import os
 from typing import Any
 
+import config
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
+from runtime import executor
 
 from query_language import compiler, schema
 from . import driver
@@ -32,11 +34,11 @@ MAX_QUESTION_LENGTH = 4_000
 app = FastAPI(title='Amicus', version=driver.BQL_VERSION,
               summary='Natural language to BQL, planned and executed.')
 
-# The Next route proxies same-origin, so this is only for hitting the API directly from a
-# browser during development. Tighten AMICUS_CORS_ORIGINS before anything is exposed.
+# The browser talks to this API directly, so its origin has to be allowed. Tighten
+# AMICUS_CORS_ORIGINS before anything is exposed.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=os.environ.get('AMICUS_CORS_ORIGINS', 'http://localhost:3000').split(','),
+    allow_origins=config.CORS_ORIGINS,
     allow_methods=['GET', 'POST'],
     allow_headers=['*'],
 )
@@ -84,18 +86,14 @@ def get_schema(name: str | None = None) -> dict[str, Any]:
 def health() -> dict[str, Any]:
     """Which stages are actually wired. `stub` here is the honest answer, not an error."""
     return {'status': 'ok', 'bql_version': driver.BQL_VERSION,
-            'schemas': schema.available(),
-            'stages': {
-                'compile': 'live',
-                'typecheck': 'live',
-                'optimize': driver.seam_status(driver.OPTIMIZER_SEAM, 'optimize', 'to_json'),
-                'execute': driver.seam_status(driver.EXECUTOR_SEAM, 'execute'),
-            }}
+            'schemas': schema.available(), 'model': config.MODEL, 'mock': config.MOCK,
+            'stages': {'relevance': 'live', 'compile': 'live', 'typecheck': 'live',
+                       'optimize': 'live',
+                       'execute': 'stub' if executor.STUB else 'live'}}
 
 def serve() -> None:
     import uvicorn
-    uvicorn.run(app, host=os.environ.get('AMICUS_HOST', '0.0.0.0'),
-                port=int(os.environ.get('AMICUS_PORT', '8000')))
+    uvicorn.run(app, host=config.HOST, port=config.PORT)
 
 if __name__ == '__main__':
     serve()

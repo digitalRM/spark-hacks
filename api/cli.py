@@ -4,8 +4,9 @@
     python3 -m api.cli compile "..." --json   # the envelope only, for piping
     python3 -m api.cli check query.json       # validate a query written by hand
     python3 -m api.cli schema                 # what the model is told
-    python3 -m api.cli models                 # what the Spark actually serves
+    python3 -m api.cli models                 # what the endpoint actually serves
     python3 -m api.cli prompt                 # the full system prompt
+    python3 -m api.cli config                 # every setting, key redacted
 
 Every command is formatting over one driver call; the pipeline logic lives in
 api/driver.py and this file deliberately holds none of it.
@@ -20,6 +21,8 @@ import argparse
 import json
 import sys
 from pathlib import Path
+
+import config
 
 from query_language import client, compiler, schema
 from . import driver
@@ -39,12 +42,14 @@ def main(argv: list[str] | None = None) -> int:
     k.add_argument('path')
 
     sub.add_parser('schema', help='print the schema as the model sees it')
-    sub.add_parser('models', help='list the model ids each server reports')
+    sub.add_parser('models', help='list the model ids the endpoint serves')
     sub.add_parser('prompt', help='print the full system prompt')
+    sub.add_parser('config', help='print every setting, key redacted')
 
     a = p.parse_args(argv)
-    reg = schema.load(a.schema)
+    if a.cmd == 'config': return _print(config.summary())
 
+    reg = schema.load(a.schema)
     if a.cmd == 'compile': return _compile(a, reg)
     if a.cmd == 'check': return _check(a.path, reg)
     if a.cmd == 'schema': return _print(reg.render_for_prompt())
@@ -99,35 +104,20 @@ def _check(path: str, reg) -> int:
     return 1
 
 def _models() -> int:
-    """Ask the configured endpoint what it serves. This verifies the model id."""
-    want = client.COMPILER_MODEL
-    if not client.is_local(want):
-        try:
-            served = client.list_models(model=want)
-        except client.ModelError as exc:
-            print(f'hosted endpoint unavailable: {exc}', file=sys.stderr)
-            return 1
-        found = want in served
-        print(f'hosted  {client.base_url_for(want)}')
-        print(f"COMPILER_MODEL = {want}  {'FOUND' if found else '*** NOT SERVED ***'}")
-        return 0 if found else 1
-
-    found = False
-    for model, (port, api) in sorted(client.LOCAL_MODELS.items(), key=lambda kv: kv[1][0]):
-        try:
-            served = client.list_models(model=model)
-        except client.ModelError as e:
-            print(f'  :{port:<6} {api:<11} down     {model}   ({str(e)[:50]})')
-            continue
-        for served_id in served:
-            mark = '*' if served_id == want else ' '
-            found = found or served_id == want
-            print(f'{mark} :{port:<6} {api:<11} serving  {served_id}')
-    print()
-    print(f"COMPILER_MODEL = {want}  {'FOUND' if found else '*** NOT SERVED ***'}")
-    if not found:
-        print('verify the local model id, port, and server process.')
-    return 0 if found else 1
+    """Ask the endpoint what it serves. This verifies the configured model ids."""
+    try:
+        served = set(client.list_models())
+    except client.ModelError as exc:
+        print(f'{config.BASE_URL} unavailable: {exc}', file=sys.stderr)
+        return 1
+    print(config.BASE_URL)
+    ok = True
+    for name, model in (('AMICUS_MODEL', config.MODEL),
+                        ('AMICUS_ROUTER_MODEL', config.ROUTER_MODEL)):
+        found = model in served
+        ok = ok and found
+        print(f"  {name:<20} {model}  {'FOUND' if found else '*** NOT SERVED ***'}")
+    return 0 if ok else 1
 
 if __name__ == '__main__':
     raise SystemExit(main())

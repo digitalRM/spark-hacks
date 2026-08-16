@@ -13,12 +13,15 @@
     {
       "name": "frontend",
       "runtimeExecutable": "bash",
-      "runtimeArgs": [
-        "-c",
-        "export NEXT_PUBLIC_AMICUS_API_URL=${NEXT_PUBLIC_AMICUS_API_URL:-http://127.0.0.1:8010}; exec npm --prefix frontend run dev"
-      ],
-      "port": 3000,
-      "autoPort": true
+      "runtimeArgs": ["scripts/web.sh"],
+      "port": 3000
+    },
+    {
+      "name": "api",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": ["scripts/api.sh"],
+      "port": 8000
     }
   ]
 }
+

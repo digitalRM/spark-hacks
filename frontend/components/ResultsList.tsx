@@ -1,10 +1,9 @@
 import type { RunResponse } from "@/lib/results";
 import ResultCard from "@/components/ResultCard";
 
-/** The list of matched cases with a small summary line on top. */
+/** The list of matched cases. */
 export default function ResultsList({ response }: { response: RunResponse }) {
-  const { results, total, tookMs } = response;
-  const n = total ?? results.length;
+  const { results } = response;
 
   return (
     <div className="flex flex-col gap-3 p-4">

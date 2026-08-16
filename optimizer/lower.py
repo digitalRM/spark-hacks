@@ -13,11 +13,11 @@ Expand/Collapse pair. Those are lowering, not optimization.
 Cost: one walk of the AST. No I/O, no model calls.
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Callable
 
 from query_language.ast import (
-    Aggregator, AggregatorOp, And, Between, Comparison, ComparisonOperator, Condition,
+    Aggregator, And, Between, Comparison, Condition,
     Expression, FieldRef, Fuzzy, InList, Join, Like, Not, Or, Query, Source, TableRef,
     Unnest, pp_condition, pp_field_ref,
 )

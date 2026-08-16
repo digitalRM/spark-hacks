@@ -1,34 +1,40 @@
 # Query language — natural language → JSON → BQL
 
-Step 3 first asks local Nemotron Lightning on Spark `:8001` to route the input.
-Court-record searches go to the JSON/BQL compiler, explanatory legal questions
-go to hosted Nemotron Super for a direct answer, and unrelated inputs stop before
-any hosted call. Compiled JSON is the wire contract defined by `ast.py` and
-`serde.py`; BQL text is generated from it by the deterministic pretty-printer,
-never accepted directly from the model.
+Step 3 routes the input first: record searches go to the JSON/BQL compiler,
+explanatory legal questions get a direct prose answer, and unrelated inputs stop
+before any compilation. Compiled JSON is the wire contract defined by `ast.py` and
+`serde.py`; BQL text is generated from it by the deterministic pretty-printer, never
+accepted directly from the model.
+
+| module | does one thing |
+|---|---|
+| `client.py` | one chat call, OpenAI protocol, one endpoint, one key |
+| `relevance.py` | routes a question: `reject` \| `compile` \| `answer` |
+| `compiler.py` | natural language → validated AST, with the repair loop |
+| `legal_answer.py` | the `answer` route: prose from Super |
+
+None of them decide what runs next — `api/driver.py` does. None of them take callbacks:
+tests patch `client.chat`.
 
 ```bash
-BQL_MOCK=1 python3 -m api.cli compile \
+AMICUS_MOCK=1 python3 -m api.cli compile \
   --json "CourtListener opinions discussing qualified immunity"
 
 python3 -m api.cli --schema dataform schema
 python3 -m unittest discover -s query_language/tests -t .
 ```
 
-For the live cloud compiler:
+For the live compiler, put a rotated key in the repo-root `.env`:
 
 ```bash
-python3 -m venv .venv
-.venv/bin/python -m pip install -r query_language/requirements.txt
-export NVIDIA_API_KEY=nvapi-your-rotated-key
+scripts/setup.sh
 .venv/bin/python -m api.cli --schema dataform compile \
   "CourtListener opinions discussing qualified immunity" --json
 ```
 
-The cloud call uses the OpenAI Python SDK with NVIDIA's OpenAI-compatible base
-URL. It streams Nemotron reasoning and content separately: reasoning is never
-printed or passed to the parser, while final content enters the JSON
-decode/validate/repair loop.
+The call uses the OpenAI Python SDK against NVIDIA's OpenAI-compatible base URL. It
+streams Nemotron reasoning and content separately: reasoning is never printed or
+passed to the parser, while final content enters the JSON decode/validate/repair loop.
 
 Global CLI options such as `--schema` go before the subcommand:
 
@@ -53,9 +59,8 @@ the new `FieldRef.path`:
 Collections use `Unnest` only when the query/result is at element grain. A
 plain collection `FieldRef` is quantified at its parent-row grain.
 
-Set `AMICUS_SCHEMA=dataform` in the API process's environment to compile against
-this canonical ingestion model. `courtlistener` remains
-available for the original flat physical schema.
+Set `AMICUS_SCHEMA=dataform` in `.env` to compile against this canonical ingestion
+model. `courtlistener` remains available for the original flat physical schema.
 
 ## Compiler boundary
 
@@ -75,57 +80,23 @@ Every compile uses a validate–repair loop. Invalid JSON, AST-shape errors, bad
 aliases, unknown nested paths, illegal joins, modality mismatches, and grouping
 errors are returned to the model with exact JSON paths for up to three attempts.
 
-## Legal request router
+## The router
 
-Before cache lookup or NL→JSON work, Lightning returns `is_legal` and one of
-three routes:
+`relevance.classify` returns one route, and `is_legal` is derived from it rather than
+carried alongside it, so the two cannot disagree:
 
-- `reject`: unrelated input; returns structured `stage: "relevance"` and makes
-  no hosted call.
-- `compile`: record retrieval/filtering/counting; runs the existing validated
-  natural-language → JSON → BQL path.
-- `answer`: legal explanation or guidance that BQL cannot answer; calls hosted
-  Super once and returns `{mode: "answer", answer: "..."}` without invoking the
-  optimizer or query runtime.
+- `reject` — no affirmative legal meaning; nothing downstream runs.
+- `compile` — record retrieval/filtering/counting; the NL → JSON → BQL path.
+- `answer` — a legal question BQL cannot express; one Super call for prose, and
+  neither the optimizer nor the runtime is involved.
 
-The rejection copy can be changed with `BQL_RELEVANCE_MESSAGE`. Set
-`BQL_RELEVANCE_ENABLED=0` only when the gate must be bypassed for diagnostics.
+It runs on `AMICUS_ROUTER_MODEL`, which defaults to `AMICUS_MODEL` — hosted Super.
+Point it at something cheaper only if the routing bill starts to matter.
 
-## Frontend/API
+## Configuration
 
-The frontend calls the Python API directly; there is no Next.js route. The API
-runs the whole pipeline (relevance, compile, typecheck, optimize, execute):
-
-```bash
-.venv/bin/python -m api.server
-```
-
-Use `BQL_MOCK=1` for deterministic offline UI development. The live compiler
-configuration is read at request time:
-
-| variable | default |
-|---|---|
-| `AMICUS_SCHEMA` | `courtlistener` from `schema.load()`; set `dataform` for the app |
-| `AMICUS_HOST` / `AMICUS_PORT` | `127.0.0.1` / `8000` |
-| `AMICUS_CORS_ORIGINS` | `http://localhost:3000` |
-| `SPARK_HOST` | `172.16.94.53` |
-| `RELEVANCE_MODEL` | `nvidia/nemotron-3.5-lightning` on local `:8001` |
-| `BQL_RELEVANCE_ENABLED` | `1` |
-| `BQL_RELEVANCE_MAX_TOKENS` | `48` |
-| `BQL_RELEVANCE_TIMEOUT_S` / `BQL_RELEVANCE_MAX_RETRIES` | `3` / `1` |
-| `BQL_REMOTE_BASE_URL` | `https://integrate.api.nvidia.com/v1` |
-| `COMPILER_MODEL` | `nvidia/nemotron-3-super-120b-a12b` |
-| `FALLBACK_COMPILER_MODEL` | same as `COMPILER_MODEL` (no silent local fallback) |
-| `LEGAL_ANSWER_MODEL` | `nvidia/nemotron-3-super-120b-a12b` |
-| `LEGAL_ANSWER_MAX_TOKENS` | `4096` |
-| `NVIDIA_API_KEY` | required for live hosted compilation |
-| `BQL_ENABLE_THINKING` | `1` |
-| `BQL_REASONING_BUDGET` | `16384` |
-| `BQL_MAX_TOKENS` | `16384` |
-| `BQL_CONTEXT_TOKENS` | `32768` |
-| `BQL_TEMPERATURE` / `BQL_TOP_P` | `1` / `0.95` |
-| `BQL_MAX_ATTEMPTS` | `3` |
-| `BQL_MOCK` | unset |
-
-The local llama-server/Ollama adapters remain available for downstream runtime
-models, but compilation no longer probes them or silently downgrades from Super.
+Everything is in the repo-root `.env`, read through `config.py`; `.env.example`
+documents it and `python -m api.cli config` prints what a process resolved. The
+knobs that are *not* environment variables — temperature, top-p, token budgets,
+attempt counts, timeouts — are constants in the module that owns them, because they
+are properties of the prompt and the model rather than of a machine.

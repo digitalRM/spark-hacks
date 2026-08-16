@@ -1,4 +1,11 @@
-import type { JsonValue } from "@/lib/dummyBql";
+/** Anything `JSON.parse` can return — what this tree renders. */
+export type JsonValue =
+  | string
+  | number
+  | boolean
+  | null
+  | JsonValue[]
+  | { [key: string]: JsonValue };
 
 type NodeProps = {
   label: string;
