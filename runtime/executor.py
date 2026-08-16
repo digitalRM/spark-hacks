@@ -269,10 +269,13 @@ def _plan_scan_query(root: PlanNode, scan: Scan) -> tuple[str, tuple]:
     has_semantic = False
     for n in walk(root):
         if isinstance(n, ExactFilter):
-            m = _EXACT_RE.search(n.predicate)
-            if m and m["op"] == "=" and m["lhs"].split(".")[-1] in _INDEXED_COLS:
+            # Use the parameterized relational form instead of reparsing the display-only
+            # BQL predicate. This stays correct for strings, numbers, and Date literals.
+            m = _SQL_CMP.match((n.sql or "").strip())
+            if (m and m["op"] == "=" and len(n.params) == 1
+                    and m["lhs"].split(".")[-1] in _INDEXED_COLS):
                 where.append(f'{m["lhs"].split(".")[-1]} = ?')
-                params.append(m["rhs"])
+                params.append(n.params[0])
         elif isinstance(n, SemanticFilter):
             has_semantic = True
             if n.predicate_class == PredicateClass.SEM and n.field.path:

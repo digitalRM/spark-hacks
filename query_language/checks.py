@@ -151,6 +151,13 @@ def _source(source: Any, path: str, aliases: dict[str, str], registry: Any,
         return
     if not isinstance(source, Join):
         return
+    # A nested join condition can only reference aliases inside that join, and it
+    # must connect its left and right subtrees. Using the query-global alias map here
+    # accidentally accepted correlated-looking trees the runtime cannot execute.
+    left_names = {ref.alias for ref in table_refs(source.left)}
+    right_names = {ref.alias for ref in table_refs(source.right)}
+    local_names = left_names | right_names
+    local_aliases = {name: table for name, table in aliases.items() if name in local_names}
     condition = source.condition
     cpath = f"{path}.condition"
     if not isinstance(condition, Comparison):
@@ -164,10 +171,20 @@ def _source(source: Any, path: str, aliases: dict[str, str], registry: Any,
                 errors.append(DecodeError(
                     f"{cpath}.op", "bad_join_op", f"joins use '=', not {condition.op.value!r}",
                 ))
-            left_name = _field_name(left, aliases)
-            right_name = _field_name(right, aliases)
-            _field(left, f"{cpath}.field1", aliases, registry, errors)
-            _field(right, f"{cpath}.field2", aliases, registry, errors)
+            left_name = _field_name(left, local_aliases)
+            right_name = _field_name(right, local_aliases)
+            _field(left, f"{cpath}.field1", local_aliases, registry, errors)
+            _field(right, f"{cpath}.field2", local_aliases, registry, errors)
+            connects_sides = (
+                (left.source in left_names and right.source in right_names)
+                or (left.source in right_names and right.source in left_names)
+            )
+            if not connects_sides:
+                errors.append(DecodeError(
+                    cpath, "bad_join_scope",
+                    "a join condition must connect one alias from its left subtree "
+                    "to one alias from its right subtree",
+                ))
             if (left_name and right_name and registry.has(left_name) and registry.has(right_name)
                     and not registry.has_edge(left_name, right_name)):
                 errors.append(DecodeError(

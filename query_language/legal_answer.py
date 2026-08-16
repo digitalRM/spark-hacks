@@ -9,9 +9,9 @@ import config
 
 from . import client
 
-MAX_TOKENS = 4096
-TIMEOUT_S = 300.0
-MAX_RETRIES = 2
+MAX_TOKENS = 1024
+TIMEOUT_S = 60.0
+MAX_RETRIES = 1
 TEMPERATURE = 0.2
 
 SYSTEM_PROMPT = """\
@@ -38,6 +38,7 @@ def answer_question(question: str) -> client.ChatResponse:
         temperature=TEMPERATURE,
         max_tokens=MAX_TOKENS,
         enable_thinking=True,
+        reasoning_budget=256,
         timeout_s=TIMEOUT_S,
         max_retries=MAX_RETRIES,
     )

@@ -21,8 +21,8 @@ import config
 
 from . import client
 
-MAX_TOKENS = 256
-TIMEOUT_S = 60.0
+MAX_TOKENS = 48
+TIMEOUT_S = 10.0
 MAX_RETRIES = 1
 
 REJECTION_MESSAGE = (
@@ -117,6 +117,8 @@ def classify(question: str) -> RelevanceResult:
         enable_thinking=False,
         timeout_s=TIMEOUT_S,
         max_retries=MAX_RETRIES,
+        reasoning_budget=0,
+        response_format={"type": "json_object"},
     )
     return RelevanceResult(decode(response.text), response.model, response.latency_ms,
                            call=response)

@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import difflib
 import json
-from dataclasses import dataclass, field as dc_field
+from dataclasses import dataclass, field as dc_field, replace
 from pathlib import Path
 from typing import Any
 
@@ -57,6 +57,15 @@ class FieldSpec:
     materialized_field: str | None = None  # physical column the derivation fills
     unit_table: str | None = None    # table holding the units (scan_page, audio_segment)
     source_field: str | None = None  # physical column holding the raw source
+    # --- physical access, filled in from the store's physical layer (see below) ---
+    physical: bool = True            # can `name` go into SQL as written?
+    index: str = "none"              # btree | nocase | fts | none -- how a predicate on
+    #                                  this field is answered. Anything but a b-tree/FTS
+    #                                  index means a full scan of the table, whose cost is
+    #                                  independent of how selective the predicate is; the
+    #                                  optimizer should price and order predicates on it
+    #                                  accordingly (docs/QUERY_COST.md).
+    storage: str | None = None       # stored | virtual, for generated columns
 
     @property
     def table(self) -> str:
@@ -65,6 +74,23 @@ class FieldSpec:
     @property
     def column(self) -> str:
         return self.name.split(".", 1)[1]
+
+    @property
+    def sql_ref(self) -> str | None:
+        """The SQL the optimizer should emit for this field, or None if it has no column.
+
+        For a flat physical schema this is just the field name. For the canonical dataform
+        it is the generated column the store maintains -- `document.media.text.plain_text`
+        is spelled `document.plain_text` in SQL. Free.
+        """
+        if self.materialized_field:
+            return self.materialized_field
+        return self.name if self.physical else None
+
+    @property
+    def is_indexed(self) -> bool:
+        """True when a predicate on this field is an index seek rather than a full scan."""
+        return self.index in ("btree", "nocase", "fts")
 
     @property
     def is_set_valued(self) -> bool:
@@ -200,7 +226,41 @@ def from_dict(d: dict[str, Any]) -> Registry:
         for side in (a, b):
             if side not in reg.fields:
                 raise ValueError(f"join edge {a} = {b} references unknown field {side!r}")
+    _attach_physical(reg)
     return reg
+
+
+def _attach_physical(reg: Registry) -> None:
+    """Fill each field's physical access info from the store's physical layer.
+
+    The canonical dataform keeps one JSON blob per row, so a BQL name like
+    `document.media.text.plain_text` is not a column; `data_ingestion.dataform.physical`
+    derives the generated column / FTS index / unnest side table that backs it, from this
+    same schema file. Reading it here means the optimizer never has to guess whether a
+    predicate is an index seek or a full corpus scan.
+
+    Degrades to "nothing is indexed" if the ingestion package is not importable, which is
+    the safe direction: the optimizer then prices every predicate as a scan. Free after the
+    first call (the plan is cached).
+    """
+    try:
+        from data_ingestion.dataform import physical
+    except Exception:  # noqa: BLE001 -- query-side code must not require the loader
+        return
+    try:
+        plan = physical.load_plan()
+    except Exception:  # noqa: BLE001 -- a malformed/absent schema is not fatal here
+        return
+    for name, spec in list(reg.fields.items()):
+        col = plan.column_for(name)
+        if col is not None:
+            reg.fields[name] = replace(spec, physical=False, materialized_field=col.qualified,
+                                       index=col.index, storage=col.mode.lower())
+            continue
+        side = plan.unnest_for(name)
+        if side is not None:
+            reg.fields[name] = replace(spec, physical=False, unit_table=side.side_table,
+                                       materialized_field=side.qualified_value, index="btree")
 
 
 _CACHE: dict[str, Registry] = {}

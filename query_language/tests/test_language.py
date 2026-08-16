@@ -11,6 +11,7 @@ import config
 from api import driver
 from query_language import (checks, client, compiler, legal_answer, relevance,
                             schema, serde)
+from query_language.bridge import registry_to_schema
 from query_language.ast import (
     Aggregator,
     AggregatorOp,
@@ -129,6 +130,22 @@ class TestCanonicalAst(unittest.TestCase):
             with self.subTest(bad=bad.where or bad.select[0]):
                 with self.assertRaises(TypeCheckError):
                     typecheck(bad, S)
+
+    def test_dataform_iso_date_range_typechecks(self):
+        structural = registry_to_schema(schema.load("dataform"))
+        query = Query(
+            (f("ev", "envelope", "id"),), t("event", "ev"),
+            Between(f("ev", "date"), "2008-01-01", "2020-12-31"), (), 10,
+        )
+        self.assertTrue(typecheck(query, structural))
+
+    def test_dataform_open_ended_iso_date_comparison_typechecks(self):
+        structural = registry_to_schema(schema.load("dataform"))
+        query = Query(
+            (f("doc", "envelope", "id"),), t("document", "doc"),
+            Comparison(Op.GE, f("doc", "date_issued"), "2022-01-01"), (), 10,
+        )
+        self.assertTrue(typecheck(query, structural))
 
     def test_round_trip_every_node(self):
         source = Join(
@@ -425,6 +442,21 @@ class TestSchemaChecks(unittest.TestCase):
         self.assertIn("bad_join_op", codes(checks.validate(
             Query((f("c", "id"),), source, None, (), 10), REG)))
 
+    def test_nested_join_cannot_reference_an_outer_alias(self):
+        registry = schema.load("dataform")
+        inner = Join(
+            eq(f("doc", "proceeding_id"), f("proc", "envelope", "id")),
+            t("document", "doc"), t("organization", "court"),
+        )
+        source = Join(
+            eq(f("proc", "organization_id"), f("court", "envelope", "id")),
+            t("proceeding", "proc"), inner,
+        )
+        errors = checks.validate(
+            Query((f("proc", "envelope", "id"),), source, None, (), 10), registry,
+        )
+        self.assertIn("bad_join_scope", codes(errors))
+
     def test_group_by_rejects_aggregate(self):
         agg = Aggregator(AggregatorOp.COUNT, None)
         self.assertIn("bad_group_by", codes(checks.validate(q(select=(agg,), group_by=(agg,)), REG)))
@@ -470,7 +502,9 @@ class TestExamplesAndPrompt(unittest.TestCase):
 
     def test_prompt_fits_context(self):
         messages = compiler.build_messages("a question", REG)
-        self.assertLess(client.estimate_tokens(messages) + client.MAX_TOKENS, client.CONTEXT_TOKENS)
+        fitted, _ = client.fit_context(messages, client.MAX_TOKENS)
+        self.assertLess(client.estimate_tokens(fitted) + client.MAX_TOKENS,
+                        client.CONTEXT_TOKENS)
 
     def test_dataform_schema_uses_nested_paths_and_its_own_examples(self):
         registry = schema.load("dataform")
@@ -481,6 +515,22 @@ class TestExamplesAndPrompt(unittest.TestCase):
         prompt = compiler.build_system_prompt(registry)
         self.assertIn("document.media.images", prompt)
         self.assertNotIn("cluster.scan_pages", prompt)
+
+    def test_terse_query_selects_only_relevant_few_shots(self):
+        registry = schema.load("dataform")
+        selected = compiler.select_few_shots("6th circuit 2019 abortion", registry)
+        self.assertEqual(len(selected), 1)
+        self.assertEqual(selected[0][0], "Fifth Circuit 2021 voting rights cases.")
+        messages = compiler.build_messages("6th circuit 2019 abortion", registry)
+        self.assertEqual(len(messages), 4)  # system + one relevant pair + live question
+
+    def test_disposition_query_selects_matching_shape_first(self):
+        registry = schema.load("dataform")
+        selected = compiler.select_few_shots(
+            "Second Circuit securities-fraud opinions since 2010 that reversed a motion to dismiss.",
+            registry,
+        )
+        self.assertIn("affirmed summary judgment", selected[0][0])
 
 
 def scripted(*replies):
@@ -552,6 +602,59 @@ class TestCompilerLoop(unittest.TestCase):
         self.assertTrue(result.ok)
         self.assertIn("exact_on_modal_field", codes(result.attempts[0]["errors"]))
 
+    def test_unambiguous_invented_alias_is_reconciled_without_a_retry(self):
+        registry = schema.load("dataform")
+        wire = serde.encode(Query(
+            (f("doc", "envelope", "id"),),
+            t("document", "doc"),
+            eq(f("org", "jurisdiction"), "ca2"),
+            (), 10,
+        ))
+        ast, errors = compiler.check_payload(wire, registry)
+        self.assertEqual(errors, [])
+        self.assertIsNotNone(ast)
+        self.assertEqual(ast.where.field1.source, "doc")
+
+    def test_table_name_is_reconciled_to_its_declared_alias(self):
+        registry = schema.load("dataform")
+        wire = serde.encode(Query(
+            (f("doc", "envelope", "id"),),
+            Join(
+                eq(f("doc", "issuing_body_id"), f("organization", "envelope", "id")),
+                t("document", "doc"), t("organization", "court"),
+            ),
+            eq(f("court", "jurisdiction"), "ca6"), (), 10,
+        ))
+        ast, errors = compiler.check_payload(wire, registry)
+        self.assertEqual(errors, [])
+        self.assertIsNotNone(ast)
+        self.assertIn("court.envelope.id", pp_query(ast))
+
+    def test_ambiguous_invented_alias_still_fails_validation(self):
+        registry = schema.load("dataform")
+        wire = serde.encode(Query(
+            (f("doc", "envelope", "id"),),
+            Join(
+                eq(f("doc", "issuing_body_id"), f("org", "envelope", "id")),
+                t("document", "doc"), t("organization", "org"),
+            ),
+            eq(f("invented", "jurisdiction"), "ca2"),
+            (), 10,
+        ))
+        _, errors = compiler.check_payload(wire, registry)
+        self.assertIn("table_not_in_scope", codes(errors))
+
+    def test_compile_and_repair_calls_keep_full_thinking_and_are_labeled(self):
+        good = json.dumps(serde.encode(q()))
+        result, fn = self.compile("no json", good)
+        self.assertTrue(result.ok)
+        self.assertEqual(fn.sent[0][1]["max_tokens"], compiler.MAX_TOKENS)
+        self.assertEqual(fn.sent[1][1]["max_tokens"], compiler.MAX_TOKENS)
+        self.assertTrue(fn.sent[0][1]["enable_thinking"])
+        self.assertTrue(fn.sent[1][1]["enable_thinking"])
+        self.assertEqual(fn.sent[0][1]["purpose"], "compile")
+        self.assertEqual(fn.sent[1][1]["purpose"], "repair 1")
+
     def test_repair_turn_carries_the_error_paths(self):
         _, fn = self.compile("no json", max_attempts=2)
         first, second = (messages for messages, _ in fn.sent)
@@ -570,6 +673,203 @@ class TestCompilerLoop(unittest.TestCase):
         self.assertEqual(compiler.cannot_express("How many cases by court?"), [])
         self.assertTrue(compiler.cannot_express("Five most recent cases"))
 
+    def test_semantic_coverage_rejects_copied_few_shot_constraints(self):
+        question = ("Find 6th Circuit cases that went up to the Supreme Court from "
+                    "2008 onwards but not after 2020")
+        copied = serde.encode(compiler.DATAFORM_FEW_SHOTS[1][1])
+        errors = compiler.semantic_coverage_errors(question, copied)
+        self.assertIn("missing_question_constraint", codes(errors))
+        self.assertIn("copied_question_constraint", codes(errors))
+
+    def test_semantic_coverage_repairs_a_wrong_but_valid_query(self):
+        question = ("Find 6th Circuit cases that went up to the Supreme Court from "
+                    "2008 onwards but not after 2020")
+        bad = json.dumps(serde.encode(compiler.DATAFORM_FEW_SHOTS[1][1]))
+        good_wire = json.loads(json.dumps(serde.encode(compiler.DATAFORM_FEW_SHOTS[-2][1]))
+                               .replace('"ca7"', '"ca6"'))
+        fn = scripted(bad, json.dumps(good_wire))
+        with mock.patch.object(client, "chat", fn):
+            result = compiler.compile_question(
+                question, registry=schema.load("dataform"), use_cache=False,
+            )
+        self.assertTrue(result.ok)
+        self.assertEqual(len(result.attempts), 2)
+        self.assertIn("copied_question_constraint", codes(result.attempts[0]["errors"]))
+        self.assertIn('"ca6"', result.printed)
+
+    def test_terse_search_requires_circuit_year_and_topic(self):
+        empty = serde.encode(Query(
+            (f("proc", "envelope", "id"),), t("proceeding", "proc"), None, (), 10,
+        ))
+        errors = compiler.semantic_coverage_errors("6th circuit 2019 abortion", empty)
+        messages = " ".join(error["message"] for error in errors)
+        self.assertIn("ca6", messages)
+        self.assertIn("2019-01-01", messages)
+        self.assertIn("abortion", messages)
+
+    def test_terse_search_few_shot_covers_every_constraint(self):
+        wire = json.loads(
+            json.dumps(serde.encode(compiler.DATAFORM_FEW_SHOTS[-1][1]))
+            .replace('"ca5"', '"ca6"')
+            .replace("2021-", "2019-")
+            .replace("voting rights", "abortion")
+        )
+        self.assertEqual(
+            compiler.semantic_coverage_errors("6th circuit 2019 abortion", wire), [],
+        )
+
+    def test_word_ordinal_and_disposition_constraints_are_required(self):
+        question = ("Second Circuit securities-fraud opinions since 2010 that "
+                    "reversed a motion to dismiss.")
+        empty = serde.encode(Query(
+            (f("doc", "envelope", "id"),), t("document", "doc"), None, (), 10,
+        ))
+        messages = " ".join(
+            error["message"] for error in compiler.semantic_coverage_errors(question, empty)
+        )
+        for expected in ("ca2", "2010", "securities fraud", "reversed motion to dismiss"):
+            self.assertIn(expected, messages)
+
+    def test_since_rejects_an_invented_calendar_year_upper_bound(self):
+        wire = serde.encode(Query(
+            (f("doc", "envelope", "id"),), t("document", "doc"),
+            Between(f("doc", "date_issued"), "2022-01-01", "2022-12-31"), (), 10,
+        ))
+        errors = compiler.semantic_coverage_errors("opinions since 2022", wire)
+        self.assertIn("invented_question_constraint", codes(errors))
+
+    def test_explicit_date_range_allows_an_upper_bound(self):
+        wire = serde.encode(Query(
+            (f("doc", "envelope", "id"),), t("document", "doc"),
+            Between(f("doc", "date_issued"), "2022-01-01", "2024-12-31"), (), 10,
+        ))
+        errors = compiler.semantic_coverage_errors(
+            "opinions since 2022 but not after 2024", wire,
+        )
+        self.assertNotIn("invented_question_constraint", codes(errors))
+
+    def test_unrequested_proceeding_constraint_is_rejected(self):
+        wire = serde.encode(Query(
+            (f("doc", "envelope", "id"),),
+            Join(eq(f("doc", "proceeding_id"), f("proc", "envelope", "id")),
+                 t("document", "doc"), t("proceeding", "proc")),
+            eq(f("proc", "proceeding_type"), "case"), (), 10,
+        ))
+        errors = compiler.semantic_coverage_errors("Sixth Circuit opinions", wire)
+        self.assertIn("invented_question_constraint", codes(errors))
+
+    def test_unambiguous_question_constraints_are_reconciled_locally(self):
+        wrong = Query(
+            (f("doc", "envelope", "id"),),
+            Join(eq(f("doc", "proceeding_id"), f("proc", "envelope", "id")),
+                 t("document", "doc"), t("proceeding", "proc")),
+            And((
+                eq(f("doc", "jurisdiction"), "ky6"),
+                Between(f("doc", "date_issued"), "2022-01-01", "2022-12-31"),
+                eq(f("proc", "proceeding_type"), "case"),
+            )), (), 10,
+        )
+        fixed = compiler._reconcile_question_constraints(
+            "6th Circuit opinions since 2022", wrong,
+        )
+        self.assertEqual(fixed.source, t("document", "doc"))
+        rendered = pp_query(fixed)
+        self.assertIn('doc.jurisdiction = "ca6"', rendered)
+        self.assertIn('doc.date_issued >= "2022-01-01"', rendered)
+        self.assertNotIn("2022-12-31", rendered)
+        self.assertNotIn("proceeding", rendered)
+
+    def test_before_after_and_bare_years_have_distinct_semantics(self):
+        base = Query(
+            (f("doc", "envelope", "id"),), t("document", "doc"),
+            Comparison(Op.GE, f("doc", "date_issued"), "2020-01-01"), (), 10,
+        )
+        before = pp_query(compiler._reconcile_question_constraints(
+            "opinions before 2020", base,
+        ))
+        after = pp_query(compiler._reconcile_question_constraints(
+            "opinions after 2020", base,
+        ))
+        bare = pp_query(compiler._reconcile_question_constraints(
+            "2020 opinions", base,
+        ))
+        self.assertIn('doc.date_issued < "2020-01-01"', before)
+        self.assertIn('doc.date_issued > "2020-12-31"', after)
+        self.assertIn('between "2020-01-01" and "2020-12-31"', bare)
+
+    def test_after_year_accepts_and_canonicalizes_next_year_boundary(self):
+        base = Query(
+            (f("doc", "envelope", "id"),), t("document", "doc"),
+            Comparison(Op.GE, f("doc", "date_issued"), "2021-01-01"), (), 10,
+        )
+        fixed = compiler._reconcile_question_constraints("opinions after 2020", base)
+        self.assertIn('doc.date_issued > "2020-12-31"', pp_query(fixed))
+
+    def test_duplicate_date_repairs_are_collapsed(self):
+        base = Query(
+            (f("doc", "envelope", "id"),), t("document", "doc"),
+            And((
+                Comparison(Op.GE, f("doc", "date_issued"), "2019-01-01"),
+                Comparison(Op.LE, f("doc", "date_issued"), "2019-12-31"),
+            )), (), 10,
+        )
+        fixed = compiler._reconcile_question_constraints("2019 opinions", base)
+        self.assertEqual(pp_query(fixed).count("between"), 1)
+
+    def test_supreme_review_relationship_is_built_deterministically(self):
+        registry = schema.load("dataform")
+        question = "Find 6th Circuit cases that went up to the Supreme Court in 2019."
+        self.assertNotIn("Supreme Court", compiler._question_for_model(question, registry))
+        base = Query(
+            (f("doc", "envelope", "id"), f("doc", "title")),
+            t("document", "doc"),
+            And((
+                eq(f("doc", "jurisdiction"), "ky6"),
+                Comparison(Op.GE, f("doc", "date_issued"), "2019-01-01"),
+            )), (), 10,
+        )
+        fixed = compiler._reconcile_question_constraints(question, base)
+        wire = serde.encode(fixed)
+        rendered = pp_query(fixed)
+        self.assertIn("join proceeding as proc", rendered)
+        self.assertIn("join event as ev", rendered)
+        self.assertIn("Supreme Court", rendered)
+        self.assertIn('between "2019-01-01" and "2019-12-31"', rendered)
+        self.assertIn('doc.jurisdiction = "ca6"', rendered)
+        self.assertEqual(checks.validate(fixed, registry), [])
+        self.assertEqual(compiler.semantic_coverage_errors(question, wire), [])
+        self.assertTrue(typecheck(fixed, registry_to_schema(registry)))
+
+    def test_bad_court_join_is_replaced_by_document_jurisdiction(self):
+        registry = schema.load("dataform")
+        wrong = Query(
+            (f("doc", "envelope", "id"),),
+            Join(
+                eq(f("court", "envelope", "id"), f("court", "jurisdiction")),
+                t("document", "doc"), t("organization", "court"),
+            ),
+            eq(f("court", "jurisdiction"), "ca1"), (), 10,
+        )
+        self.assertTrue(checks.validate(wrong, registry))
+        fixed = compiler._reconcile_question_constraints("First Circuit opinions", wrong)
+        self.assertEqual(fixed.source, t("document", "doc"))
+        self.assertIn('doc.jurisdiction = "ca1"', pp_query(fixed))
+        self.assertEqual(checks.validate(fixed, registry), [])
+
+    def test_explicit_topic_is_restored_when_model_drops_it(self):
+        base = Query(
+            (f("doc", "envelope", "id"),), t("document", "doc"),
+            eq(f("doc", "jurisdiction"), "ca1"), (), 10,
+        )
+        fixed = compiler._reconcile_question_constraints(
+            "First Circuit opinions before 2020 involving habeas relief", base,
+        )
+        self.assertIn('fuzzy(doc.summary, "habeas relief")', pp_query(fixed))
+
+    def test_complex_compile_keeps_thinking_and_a_large_output_ceiling(self):
+        self.assertTrue(compiler.THINKING)
+        self.assertGreaterEqual(compiler.MAX_TOKENS, 8192)
+
 
 class TestRouter(unittest.TestCase):
     def test_router_returns_a_route_and_derives_is_legal(self):
@@ -583,6 +883,8 @@ class TestRouter(unittest.TestCase):
         self.assertEqual(kwargs["model"], config.ROUTER_MODEL)
         self.assertEqual(kwargs["temperature"], 0.0)
         self.assertIs(kwargs["enable_thinking"], False)
+        self.assertEqual(kwargs["reasoning_budget"], 0)
+        self.assertEqual(kwargs["response_format"], {"type": "json_object"})
 
     def test_router_defaults_to_the_main_hosted_model(self):
         """No separate local router: the router runs on the same hosted model as
@@ -613,6 +915,7 @@ class TestLegalAnswer(unittest.TestCase):
         messages, kwargs = fn.sent[0]
         self.assertEqual(kwargs["model"], config.MODEL)
         self.assertTrue(kwargs["enable_thinking"])
+        self.assertEqual(kwargs["reasoning_budget"], 256)
         self.assertIn("rather than legal advice", messages[0]["content"])
 
     def test_empty_answer_is_an_error(self):

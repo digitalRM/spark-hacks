@@ -58,7 +58,7 @@
     {"name": "document.date_issued", "type": "DATE", "description": "Issue date."},
     {"name": "document.status", "type": "SCALAR", "description": "Publication or lifecycle status."},
     {"name": "document.summary", "type": "TEXT", "description": "Document summary.", "embeddable": true},
-    {"name": "document.media.text.plain_text", "type": "TEXT", "description": "Full normalized text body.", "embeddable": true},
+    {"name": "document.media.text.plain_text", "type": "TEXT", "description": "Full normalized text body.", "embeddable": true, "storage": "virtual", "index": "fts"},
     {"name": "document.media.images", "type": "IMAGE_SET", "description": "Scanned pages and exhibits.", "unit": "page", "fanout": 24.0, "quantifier": "ANY"},
     {"name": "document.media.audio", "type": "AUDIO", "description": "Audio recordings and time-aligned transcript data.", "unit": "segment", "fanout": 120.0, "quantifier": "ANY", "embeddable": true},
     {"name": "document.source_pdf_url", "type": "SCALAR", "description": "Source PDF URL."},

@@ -11,6 +11,17 @@ language over structured, text, image, document, and audio data.
 
 ## The pipeline
 
+### Step 1 → 2 → 3 connection
+
+The `dataform` schema maps nested fields from
+`data_ingestion/dataform/models.py` directly to `FieldRef.path` in
+`query_language/ast.py`. The same schema file drives
+`data_ingestion/dataform/physical.py`, which gives every queryable field an indexed
+column, an FTS5 index, or an unnest side table, so a BQL predicate is an index seek
+rather than a scan of the whole corpus — and tells the optimizer which is which through
+`FieldSpec.index` / `.sql_ref`. Measurements and the cost model are in
+`docs/QUERY_COST.md`.
+
 ```text
 data_ingestion.dataform
         │  schemas/dataform.json
@@ -76,5 +87,12 @@ AMICUS_MOCK=1 .venv/bin/python -m api.cli compile "9th Circuit cases with a phot
 npm --prefix frontend run lint && npm --prefix frontend run build
 ```
 
-See `docs/DATAFORM.md`, `query_language/README.md`, `api/README.md`, and
-`frontend/README.md` for the individual contracts.
+```bash
+.venv/bin/python -m data_ingestion.dataform.models
+.venv/bin/python -m data_ingestion.dataform.store
+.venv/bin/python -m data_ingestion.dataform.physical   # exits 1 if a schema field is unmapped
+```
+
+See `docs/DATAFORM.md`, `docs/QUERY_COST.md`, `query_language/README.md`,
+`api/README.md`, and `frontend/README.md` for the individual contracts and
+configuration details.

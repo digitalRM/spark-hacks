@@ -18,6 +18,9 @@ from typing import Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
+# Unshadowed handle on `datetime.date`, for models that also declare a field named `date`.
+_Date = date
+
 
 def new_id() -> str:
     return str(uuid.uuid4())
@@ -279,7 +282,12 @@ class Event(BaseModel):
     event_type: EventType
     proceeding_id: Optional[str] = None
     person_id: Optional[str] = None
-    date: Optional[date] = None
+    # `_Date`, not `date`: a field named `date` shadows the `date` type inside this class
+    # body, and with `from __future__ import annotations` pydantic resolves the deferred
+    # annotation against that shadow and types the field NoneType -- silently making it
+    # impossible to store an event date at all, and leaving store.py's indexed `date`
+    # column NULL for every Event. The alias keeps the field (and BQL path) named `date`.
+    date: Optional[_Date] = None
     description: Optional[str] = None
     actor: Optional[str] = None
     outcome: Optional[str] = None

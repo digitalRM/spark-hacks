@@ -3,6 +3,11 @@
 One table per canonical entity: a handful of indexed columns for filtering
 plus a `data` column holding the full Pydantic JSON blob. Mirrors the
 `corpus/store.py` SQLite-index pattern described in the Amicus README.
+
+The blob stays the source of truth, but every field the query language can name is also
+exposed as a generated column and indexed, so a BQL predicate is an index seek rather than
+a full scan of the corpus -- see `physical.py` for the mapping and docs/QUERY_COST.md for
+the measured difference (26 ms -> 0.2 ms per predicate on a 10k-document corpus).
 """
 from __future__ import annotations
 
@@ -13,6 +18,7 @@ from typing import Iterable, List, Optional, Type, TypeVar
 
 from pydantic import BaseModel
 
+from . import physical
 from .models import ALL_MODELS
 
 T = TypeVar("T", bound=BaseModel)
@@ -31,7 +37,7 @@ CREATE TABLE IF NOT EXISTS {table} (
     source_id TEXT,
     doc_type TEXT,
     date TEXT,
-    data TEXT NOT NULL
+    data TEXT NOT NULL{generated}
 );
 CREATE INDEX IF NOT EXISTS idx_{table}_source ON {table}(source_system, source_id);
 CREATE INDEX IF NOT EXISTS idx_{table}_doc_type ON {table}(doc_type);
@@ -42,8 +48,11 @@ CREATE INDEX IF NOT EXISTS idx_{table}_date ON {table}(date);
 class Store:
     """Generic upsert-by-id SQLite store for any canonical entity model."""
 
-    def __init__(self, db_path: Optional[Path] = None):
+    def __init__(self, db_path: Optional[Path] = None, optimize: Optional[bool] = None):
         self.db_path = db_path or DEFAULT_DB_PATH
+        # `optimize` controls the query-side physical layer only; the blob is unaffected
+        # either way, so a pure ingestion job can turn it off (DATAFORM_PHYSICAL=0).
+        self.optimize = physical.is_enabled() if optimize is None else optimize
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         # check_same_thread=False: each worker thread in parallel_load.py owns its own
         # Store instance (own connection) -- this only relaxes sqlite3's same-thread
@@ -59,8 +68,14 @@ class Store:
         self._ensure_schema()
 
     def _ensure_schema(self) -> None:
+        plan = physical.load_plan() if self.optimize else None
         for model in ALL_MODELS:
-            self.conn.executescript(_SCHEMA_TEMPLATE.format(table=_table_name(model)))
+            table = _table_name(model)
+            # Fresh tables get STORED generated columns (cheaper to project); tables that
+            # already exist get the VIRTUAL equivalent from physical.apply() below, since
+            # ALTER TABLE cannot add STORED ones. Index reachability is the same either way.
+            generated = physical.create_table_columns(table, plan) if plan else ""
+            self.conn.executescript(_SCHEMA_TEMPLATE.format(table=table, generated=generated))
         self.conn.executescript(
             """
             CREATE TABLE IF NOT EXISTS checkpoints (
@@ -72,6 +87,19 @@ class Store:
             """
         )
         self.conn.commit()
+        if self.optimize:
+            # Idempotent: adds whatever a pre-existing database is missing (VIRTUAL
+            # columns, indexes, the FTS5 and unnest tables) and is a no-op afterwards.
+            physical.apply(self.conn, plan)
+
+    def optimize_for_queries(self) -> dict[str, int]:
+        """Rebuild the derived query structures (FTS5 + unnest side tables).
+
+        Call once after a load completes. These are derived from the blobs rather than
+        maintained per insert, because a bulk load would otherwise pay trigger cost on
+        every row. Generated columns and their indexes need no such step -- SQLite keeps
+        them current itself. Cost: one pass over the corpus (~0.9 s per 10k documents)."""
+        return physical.rebuild_derived(self.conn)
 
     def get_checkpoint(self, key: str) -> Optional[str]:
         row = self.conn.execute("SELECT value FROM checkpoints WHERE key = ?", (key,)).fetchone()
@@ -99,6 +127,13 @@ class Store:
         for model in ALL_MODELS:
             self.conn.execute(f"DELETE FROM {_table_name(model)}")
         self.conn.execute("DELETE FROM checkpoints")
+        if self.optimize:
+            # Derived tables are not covered by the DELETEs above (no triggers by design),
+            # so a "fresh start" has to empty them too or they keep serving stale hits.
+            for side in physical.load_plan().unnest:
+                self.conn.execute(f'DELETE FROM "{side.side_table}"')
+            for fts in physical.load_plan().fts:
+                self.conn.execute(f"INSERT INTO {fts.fts_table}({fts.fts_table}) VALUES('rebuild')")
         self.conn.commit()
 
     def _date_value(self, record: BaseModel) -> Optional[str]:
