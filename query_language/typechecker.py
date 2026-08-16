@@ -39,14 +39,24 @@ def modal_base(t: FieldType, ctx: str) -> ModalType:
         case TextType() | ImageType() | AudioType(): return t
         case _: raise TypeCheckError(f'{ctx}: expected modal type (text/image/audio), got {t!r}')
 
+def unwrap_optional(t: FieldType) -> FieldType:
+    """Strip OptionalType only -- unlike modal_base this doesn't also unwrap
+    Array/Sequence, since a bare array/sequence still isn't a comparable
+    scalar. Needed because a nullable field (the common case for any real
+    date/numeric column) otherwise fails every isinstance/type-equality check
+    below even though nullability has nothing to do with comparability."""
+    return unwrap_optional(t.inner) if isinstance(t, OptionalType) else t
+
 def resolve_expression(e: Expression, env: Env) -> FieldType:
     match e:
         case FieldRef(source, path): return resolve_field_ref(source, path, env)
-        case Unnest(ref):
+        case Unnest(ref, path):
             match resolve_field_ref(ref.source, ref.path, env):
-                case ArrayType(el) | SequenceType(el):               return el
-                case OptionalType(ArrayType(el) | SequenceType(el)): return el
+                case ArrayType(el) | SequenceType(el):               elem_t = el
+                case OptionalType(ArrayType(el) | SequenceType(el)): elem_t = el
                 case t: raise TypeCheckError(f'Cannot unnest {t!r}')
+            for key in path: elem_t = field_access(elem_t, key)
+            return elem_t
         case Aggregator(AggregatorOp.COUNT, _): return IntType()
         case Aggregator(AggregatorOp.AVG, arg) if arg is not None:
             if not isinstance(resolve_expression(arg, env), (IntType, FloatType)):
@@ -65,6 +75,7 @@ def resolve_expression(e: Expression, env: Env) -> FieldType:
         case _: raise TypeCheckError(f'Unknown expression: {e!r}')
 
 def check_comparable(op: ComparisonOperator, lt: FieldType, rt: FieldType) -> None:
+    lt, rt = unwrap_optional(lt), unwrap_optional(rt)
     if op != ComparisonOperator.EQ and not isinstance(lt, (IntType, FloatType, TimestampType)):
         raise TypeCheckError(f'Operator {op.value} not supported for {lt!r}')
     if type(lt) != type(rt) and not (
@@ -77,14 +88,14 @@ def check_condition(c: Condition, env: Env) -> None:
         case Fuzzy(field, _):      modal_base(resolve_expression(field, env), 'fuzzy')
         case Comparison(op, l, r): check_comparable(op, resolve_expression(l, env), resolve_expression(r, env))
         case InList(field, vals):
-            ft = resolve_field_ref(field.source, field.path, env)
+            ft = resolve_expression(field, env)
             for v in vals: check_comparable(ComparisonOperator.EQ, ft, resolve_expression(v, env))
         case Between(field, lo, hi):
-            ft = resolve_field_ref(field.source, field.path, env)
+            ft = unwrap_optional(resolve_expression(field, env))
             if not isinstance(ft, (IntType, FloatType, TimestampType)):
                 raise TypeCheckError(f'between requires numeric/timestamp field, got {ft!r}')
         case Like(field, _):
-            if not isinstance(resolve_field_ref(field.source, field.path, env), TextType):
+            if not isinstance(unwrap_optional(resolve_expression(field, env)), TextType):
                 raise TypeCheckError('like requires text field')
         case And(children) | Or(children):
             for ch in children: check_condition(ch, env)

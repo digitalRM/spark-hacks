@@ -21,7 +21,7 @@ body {
   font-family: var(--font-inter), system-ui, sans-serif;
 }
 
-/* Results panel entrance */
+/* results panel entrance */
 @keyframes rise-in {
   from {
     opacity: 0;
@@ -36,81 +36,62 @@ body {
   animation: rise-in 0.45s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
-/* Top-down query-plan tree connectors */
-.plan-root,
-.plan-children {
-  --line: #d4d4d4;
-  --drop: 1.25rem; /* vertical run between a parent and its children row */
-  display: flex;
-  justify-content: center;
-  align-items: flex-start;
-  width: max-content;
-  min-width: 100%;
-  margin: 0;
-  padding: 0;
-  list-style: none;
+/* staggered chip entrance: fade in + slide from the left */
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: translateX(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
 }
-.plan-children {
-  position: relative;
-  padding-top: var(--drop);
-  min-width: 0;
-}
-/* stem from the parent card down to the children rail */
-.plan-children::before {
-  content: "";
-  position: absolute;
-  top: 0;
-  left: 50%;
-  height: var(--drop);
-  border-left: 1.5px solid var(--line);
-}
-.plan-node {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  padding: var(--drop) 0.5rem 0;
-}
-/* horizontal rail halves + drop into each child */
-.plan-node::before,
-.plan-node::after {
-  content: "";
-  position: absolute;
-  top: 0;
-  width: 50%;
-  height: var(--drop);
-  border-top: 1.5px solid var(--line);
-}
-.plan-node::before {
-  right: 50%;
-}
-.plan-node::after {
-  left: 50%;
-  border-left: 1.5px solid var(--line);
-}
-.plan-node:first-child::before,
-.plan-node:last-child::after {
-  border-top: none;
-}
-.plan-node:last-child::after {
-  border-left: 1.5px solid var(--line);
-}
-.plan-node:only-child::before {
-  display: none;
-}
-.plan-node:only-child::after {
-  border-top: none;
-}
-/* the root has no rail above it */
-.plan-root > .plan-node {
-  padding-top: 0;
-}
-.plan-root > .plan-node::before,
-.plan-root > .plan-node::after {
-  display: none;
+.animate-pop-in {
+  animation: pop-in 0.35s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
-/* Left-to-right JSON tree connectors */
+/* gradient shimmer sweeping thru text (thinking label) */
+@keyframes shimmer {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+.shimmer-text {
+  color: transparent;
+  background-image: linear-gradient(
+    100deg,
+    #737373 0%,
+    #737373 35%,
+    #a78bfa 45%,
+    #60a5fa 52%,
+    #737373 62%,
+    #737373 100%
+  );
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  /* exactly two passes per phrase; ThinkingLabel swaps text right after */
+  animation: shimmer var(--shimmer-ms, 2400ms) linear 2 both;
+}
+
+/* gentle content swap inside an already mounted panel */
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.animate-fade-in {
+  animation: fade-in 0.25s ease-out both;
+}
+
+/* left-to-right json tree connectors */
 .tree-children {
   --line: #d4d4d4;
   --gap: 1.75rem;
