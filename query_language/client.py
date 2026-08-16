@@ -27,7 +27,7 @@ TEMPERATURE = 1.0
 TOP_P = 0.95
 MAX_TOKENS = 16384
 CONTEXT_TOKENS = 32768          # what we budget the conversation against
-REASONING_BUDGET = 16384
+REASONING_BUDGET = 8192
 ENABLE_THINKING = True          # a reasoning model thinks out loud unless told not to
 TIMEOUT_S = 300.0
 MAX_RETRIES = 3
@@ -151,10 +151,16 @@ def chat(messages: list[dict[str, str]], *, model: str | None = None,
                 "reasoning_budget": REASONING_BUDGET,
             },
             stream=True,
+            stream_options={"include_usage": True},   # a final usage chunk after the last delta
         )
         content: list[str] = []
         thought = False
+        tokens_in = tokens_out = 0
         for chunk in stream:
+            usage = getattr(chunk, "usage", None)
+            if usage is not None:
+                tokens_in = getattr(usage, "prompt_tokens", 0) or 0
+                tokens_out = getattr(usage, "completion_tokens", 0) or 0
             choices = getattr(chunk, "choices", None)
             if not choices:
                 continue
@@ -163,10 +169,12 @@ def chat(messages: list[dict[str, str]], *, model: str | None = None,
             text = getattr(delta, "content", None)
             if text is not None:
                 content.append(text)
+        latency_ms = (time.perf_counter() - t0) * 1000
         result = ChatResponse(text="".join(content).strip(), model=model,
-                            latency_ms=(time.perf_counter() - t0) * 1000,
-                            dropped_shots=dropped, thought=thought)
-        print(f"latency_ms = {(time.perf_counter() - t0) * 1000}")
+                            tokens_in=tokens_in, tokens_out=tokens_out,
+                            latency_ms=latency_ms, dropped_shots=dropped, thought=thought)
+        # completion_tokens includes reasoning: this is the number that explains the wait.
+        print(f"latency_ms = {latency_ms:.0f} tokens_in = {tokens_in} tokens_out = {tokens_out}")
         return result
     except ModelError:
         raise

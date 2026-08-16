@@ -31,6 +31,7 @@ from query_language.ast import (
     pp_query,
 )
 from query_language.typechecker import (
+    TypeCheckError,
     example_aggregate_typecheck,
     example_schema,
     example_typecheck,
@@ -87,6 +88,38 @@ class TestCanonicalAst(unittest.TestCase):
         )
         self.assertTrue(typecheck(query, example_schema))
 
+    def test_typechecker_accepts_ordinary_scalar_predicates(self):
+        """The registry types every plain column as text, so these must not be type errors:
+        ordering and min/max on ISO dates, numeric literals against text columns, and
+        membership on set-valued scalars."""
+        from query_language.bridge import registry_to_schema
+        from query_language.schema import load
+        S = registry_to_schema(load("dataform"))
+        doc, per, proc = t("document", "doc"), t("person", "p"), t("proceeding", "proc")
+        ok = [
+            Query((f("doc", "title"),), doc, Comparison(Op.GE, f("doc", "date_issued"), "2008-01-01"), (), 10),
+            Query((f("doc", "title"),), doc, Comparison(Op.GE, f("doc", "date_issued"), 2008), (), 10),
+            Query((f("doc", "title"),), doc, Comparison(Op.EQ, f("doc", "envelope", "id"), 123), (), 10),
+            Query((f("doc", "title"),), doc, Between(f("doc", "date_issued"), "2008-01-01", "2010-12-31"), (), 10),
+            Query((f("p", "name_last"),), per, Comparison(Op.EQ, f("p", "role_types"), "judge"), (), 10),
+            Query((f("p", "name_last"),), per, InList(f("p", "role_types"), ("judge", "attorney")), (), 10),
+            Query((f("p", "name_last"),), per, Like(f("p", "role_types"), "%judge%"), (), 10),
+            Query((f("proc", "organization_id"), Aggregator(AggregatorOp.MAX, f("proc", "date_filed"))),
+                  proc, None, (f("proc", "organization_id"),), None),
+        ]
+        for query in ok:
+            with self.subTest(where=query.where or query.select[-1]):
+                self.assertTrue(typecheck(query, S))
+        # Still rejected: ordering on a set, comparing modal content, summing text.
+        for bad in [
+            Query((f("p", "name_last"),), per, Comparison(Op.GT, f("p", "role_types"), "judge"), (), 10),
+            Query((f("doc", "title"),), doc, Comparison(Op.EQ, f("doc", "media", "images"), "x"), (), 10),
+            Query((Aggregator(AggregatorOp.SUM, f("doc", "title")),), doc, None, (), None),
+        ]:
+            with self.subTest(bad=bad.where or bad.select[0]):
+                with self.assertRaises(TypeCheckError):
+                    typecheck(bad, S)
+
     def test_round_trip_every_node(self):
         source = Join(
             eq(f("c", "docket_id"), f("d", "id")),
@@ -142,7 +175,14 @@ class TestWireValidation(unittest.TestCase):
     def test_legacy_column_field_is_rejected(self):
         wire = serde.encode(q())
         wire["select"][0] = {"kind": "FieldRef", "source": "cluster", "column": "id"}
-        self.assertIn("unexpected_key", codes(serde.decode_errors(wire)))
+        # The legacy key itself is ignored; what fails is the missing v2 `path`.
+        self.assertIn("bad_field_path", codes(serde.decode_errors(wire)))
+
+    def test_unknown_keys_are_ignored(self):
+        wire = serde.encode(q())
+        wire["order_by"] = []
+        wire["select"][0]["note"] = "extra"
+        self.assertEqual(serde.decode_errors(wire), [])
 
     def test_legacy_bare_source_is_rejected(self):
         wire = serde.encode(q())

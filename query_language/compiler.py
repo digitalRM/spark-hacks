@@ -38,9 +38,22 @@ from .ast import (Aggregator, AggregatorOp, And, Between, Comparison,
 from .serde import BQL_VERSION, DecodeError
 
 MAX_ATTEMPTS = 3
-# The repair turns run at the same temperature as the first: the model is being handed
-# exact error paths, not asked to explore.
+# The first attempt samples at the model's recommended reasoning temperature. Repair turns
+# run cooler: the model is being handed exact error paths, not asked to explore, and at 1.0
+# it was seen reproducing the same JSON syntax slip three attempts running.
 TEMPERATURE = client.TEMPERATURE
+REPAIR_TEMPERATURE = 0.6
+# Ceiling on one attempt's output, reasoning included. The JSON AST itself is ~1k tokens;
+# measured runs spent 4-8k more on reasoning before it. 8192 leaves room for that and
+# fails a runaway attempt into the repair loop instead of waiting on client.MAX_TOKENS.
+MAX_TOKENS = 8192
+# Thinking stays on for every attempt. Measured on the hosted endpoint against Super:
+# without thinking the AST comes back in ~300 tokens / 4-8 s and *validates*, but on a
+# multi-hop question it is faithful-looking and wrong (a fuzzy on the title instead of the
+# citation join) -- and the repair loop cannot see semantic misses, only schema errors.
+# With thinking it is 1-5k tokens / 15-35 s and gets the join right. Correct and slow
+# beats fast and wrong here; the cache absorbs repeats.
+THINKING = True
 CACHE_DIR = Path(__file__).resolve().parent / "cache"
 EXAMPLES_DIR = Path(__file__).resolve().parent / "examples"
 
@@ -472,7 +485,10 @@ def compile_question(question: str, *, registry: schema.Registry | None = None,
     errors: list[DecodeError] = []
 
     for attempt in range(1, max_attempts + 1):
-        resp = client.chat(messages, model=mdl, temperature=TEMPERATURE)
+        thinking = THINKING
+        temperature = TEMPERATURE if attempt == 1 else REPAIR_TEMPERATURE
+        resp = client.chat(messages, model=mdl, temperature=temperature,
+                           max_tokens=MAX_TOKENS, enable_thinking=thinking)
         obj, parse_error = extract_json(resp.text)
         if parse_error is not None:
             ast, errors = None, [DecodeError("$", "invalid_json", parse_error)]
@@ -480,6 +496,7 @@ def compile_question(question: str, *, registry: schema.Registry | None = None,
             ast, errors = check_payload(obj, reg)
 
         attempts.append({"attempt": attempt, "model": resp.model, "ok": not errors,
+                         "thinking": thinking, "temperature": temperature,
                          "errors": list(errors), "tokens_in": resp.tokens_in,
                          "tokens_out": resp.tokens_out, "latency_ms": round(resp.latency_ms, 1),
                          "dropped_shots": resp.dropped_shots,

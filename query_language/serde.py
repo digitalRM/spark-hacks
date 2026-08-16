@@ -156,12 +156,11 @@ def _obj(value: Any, path: str, expected: str, errors: list[DecodeError]) -> dic
 
 
 def _keys(value: dict, path: str, allowed: set[str], errors: list[DecodeError]) -> None:
-    for key in value:
-        if key != "kind" and key not in allowed:
-            errors.append(DecodeError(
-                f"{path}.{key}", "unexpected_key",
-                f"{value['kind']} has no key {key!r}; allowed: {', '.join(sorted(allowed))}",
-            ))
+    """Unknown keys are ignored, not errors. A model that writes `"operator":"and"` on an
+    And, or `"order_by":[]` on a Query, has still produced a valid query, and rejecting it
+    costs a full repair round trip for nothing. A *misspelled required* key is still caught,
+    because the required key is then missing and its own check fires."""
+    return None
 
 
 def _query(value: Any, path: str, errors: list[DecodeError]) -> Query | None:

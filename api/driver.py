@@ -19,13 +19,11 @@ direct legal answer -- and nothing about the later stages. That is the contract 
 frontend depends on, and it must not start failing the day the executor lands and errors
 on a hard query.
 
-One known gap, deliberately left visible rather than papered over: the registry types every
-non-modal column as the single string SCALAR, so an ISO date arrives as text, while
-`check_comparable` allows <, <=, >, >= on numeric and timestamp only. A query carrying
-`date_filed >= "2020-01-01"` compiles and then fails typecheck. The one-line fix is to let
-ordering comparisons through on TextType -- lexicographic order is correct for ISO-8601 and
-is exactly what SQLite does on a TEXT date column -- but that is a semantics decision in
-`query_language/typechecker.py`, so it is reported, not taken.
+Dates: the registry types every non-modal column as the single string SCALAR, so an ISO
+date arrives at the typechecker as text. `query_language/typechecker.py` therefore allows
+ordering comparisons (<, <=, >, >=, between) on TextType -- lexicographic order is correct
+for ISO-8601 and is exactly what SQLite does on a TEXT date column -- so
+`date_filed >= "2020-01-01"` compiles and typechecks.
 
 Cost: one routing call, then one compiler round trip on a cache miss, or one direct
 answer. Pure computation from there until the executor lands.

@@ -8,7 +8,7 @@ import { fileTitle, formatBytes, type ResultFile } from "@/lib/results";
  * page of interest when known. Falls back to a link if embedding fails.
  */
 export default function PdfViewer({ file }: { file: ResultFile }) {
-  const [tall, setTall] = useState(false);
+  const [tall, setTall] = useState(true);
   const title = fileTitle(file);
   const src = `${file.url}#toolbar=0&navpanes=0${file.page ? `&page=${file.page}` : ""}`;
 

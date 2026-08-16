@@ -93,6 +93,42 @@ body {
   animation: fade-in 0.25s ease-out both;
 }
 
+/* modal panel: transform only (never opacity) so nothing behind it can show
+   through the panel mid-animation; the backdrop handles the fade */
+@keyframes modal-in {
+  from {
+    transform: translateY(8px) scale(0.98);
+  }
+  to {
+    transform: translateY(0) scale(1);
+  }
+}
+.animate-modal-in {
+  animation: modal-in 0.28s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+@keyframes modal-out {
+  from {
+    transform: translateY(0) scale(1);
+  }
+  to {
+    transform: translateY(4px) scale(0.98);
+  }
+}
+.animate-modal-out {
+  animation: modal-out 0.1s ease-in both;
+}
+@keyframes fade-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+.animate-fade-out {
+  animation: fade-out 0.1s ease-in both;
+}
+
 /* left-to-right json tree connectors */
 .tree-children {
   --line: #d4d4d4;

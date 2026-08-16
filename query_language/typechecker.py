@@ -49,13 +49,18 @@ def resolve_expression(e: Expression, env: Env) -> FieldType:
                 case t: raise TypeCheckError(f'Cannot unnest {t!r}')
         case Aggregator(AggregatorOp.COUNT, _): return IntType()
         case Aggregator(AggregatorOp.AVG, arg) if arg is not None:
-            if not isinstance(resolve_expression(arg, env), (IntType, FloatType)):
+            if not isinstance(scalar_base(resolve_expression(arg, env)), (IntType, FloatType)):
                 raise TypeCheckError('avg requires numeric type')
             return FloatType()
-        case Aggregator(op, arg) if arg is not None:
-            t = resolve_expression(arg, env)
+        case Aggregator(AggregatorOp.SUM, arg) if arg is not None:
+            t = scalar_base(resolve_expression(arg, env))
             if not isinstance(t, (IntType, FloatType)):
-                raise TypeCheckError(f'{op.value} requires numeric type, got {t!r}')
+                raise TypeCheckError(f'sum requires numeric type, got {t!r}')
+            return t
+        case Aggregator(op, arg) if arg is not None:            # min / max: anything orderable
+            t = scalar_base(resolve_expression(arg, env))
+            if not isinstance(t, ORDERABLE):
+                raise TypeCheckError(f'{op.value} requires an orderable type, got {t!r}')
             return t
         case Aggregator(op, None): raise TypeCheckError(f'{op.value} requires an argument')
         case bool():  return BoolType()   # before int — bool subclasses int
@@ -64,13 +69,34 @@ def resolve_expression(e: Expression, env: Env) -> FieldType:
         case str():   return TextType()
         case _: raise TypeCheckError(f'Unknown expression: {e!r}')
 
+# Ordering (<, <=, >, >=, between, min, max) is allowed on text as well as numbers and
+# timestamps. The registry types every non-modal column as SCALAR, so ISO-8601 dates arrive
+# here as text; lexicographic order is correct for them and is what SQLite does on a TEXT
+# date column.
+ORDERABLE = (IntType, FloatType, TimestampType, TextType)
+# Scalars compare across kinds -- `date_issued >= 2008`, `envelope.id = 123`, `flag = true` --
+# with SQLite's affinity semantics: the literal is coerced to the column. The registry cannot
+# say whether an id column is text or integer (both exist in one corpus), so a strict
+# type-equality rule would fail the most ordinary predicates on a guess. What is NOT
+# comparable: modal content (image/audio) and collections, except by membership below.
+SCALAR = (TextType, IntType, FloatType, BoolType, TimestampType)
+
+def scalar_base(t: FieldType) -> FieldType:
+    """Strip Optional wrappers. Collections and modal types come back unchanged."""
+    return scalar_base(t.inner) if isinstance(t, OptionalType) else t
+
 def check_comparable(op: ComparisonOperator, lt: FieldType, rt: FieldType) -> None:
-    if op not in (ComparisonOperator.EQ, ComparisonOperator.NE) and not isinstance(lt, (IntType, FloatType, TimestampType)):
+    lt, rt = scalar_base(lt), scalar_base(rt)
+    # A set-valued scalar column against one scalar is membership: role_types = "judge",
+    # party_ids in [...]. Only equality makes sense there.
+    if isinstance(lt, (ArrayType, SequenceType)) and isinstance(rt, SCALAR):
+        if op not in (ComparisonOperator.EQ, ComparisonOperator.NE):
+            raise TypeCheckError(f'Operator {op.value} not supported on a set-valued field {lt!r}; use = or in')
+        lt = scalar_base(lt.element)
+    if not isinstance(lt, SCALAR) or not isinstance(rt, SCALAR):
+        raise TypeCheckError(f'Cannot compare {lt!r} with {rt!r}; comparisons take scalar fields and literals')
+    if op not in (ComparisonOperator.EQ, ComparisonOperator.NE) and not isinstance(lt, ORDERABLE):
         raise TypeCheckError(f'Operator {op.value} not supported for {lt!r}')
-    if type(lt) != type(rt) and not (
-        isinstance(lt, (IntType, FloatType)) and isinstance(rt, (IntType, FloatType))
-    ):
-        raise TypeCheckError(f'Type mismatch: {lt!r} vs {rt!r}')
 
 def check_condition(c: Condition, env: Env) -> None:
     match c:
@@ -80,27 +106,44 @@ def check_condition(c: Condition, env: Env) -> None:
             ft = resolve_field_ref(field.source, field.path, env)
             for v in vals: check_comparable(ComparisonOperator.EQ, ft, resolve_expression(v, env))
         case Between(field, _, _):
-            ft = resolve_field_ref(field.source, field.path, env)
-            if not isinstance(ft, (IntType, FloatType, TimestampType)):
-                raise TypeCheckError(f'between requires numeric/timestamp field, got {ft!r}')
+            ft = scalar_base(resolve_field_ref(field.source, field.path, env))
+            if not isinstance(ft, ORDERABLE):
+                raise TypeCheckError(f'between requires an orderable field, got {ft!r}')
         case Like(field, _):
-            if not isinstance(resolve_field_ref(field.source, field.path, env), TextType):
-                raise TypeCheckError('like requires text field')
+            ft = scalar_base(resolve_field_ref(field.source, field.path, env))
+            if isinstance(ft, (ArrayType, SequenceType)): ft = scalar_base(ft.element)   # any member matches
+            if not isinstance(ft, TextType):
+                raise TypeCheckError(f'like requires a text field, got {ft!r}')
         case And(children) | Or(children):
             for ch in children: check_condition(ch, env)
         case Not(child): check_condition(child, env)
         case _: raise TypeCheckError(f'Unknown condition: {c!r}')
 
-def resolve_source(s: Source, schema: Schema) -> Env:
+def source_env(s: Source, schema: Schema) -> Env:
+    """Every alias in the FROM clause, with its table type."""
     match s:
         case TableRef(name, alias):
             if name not in schema: raise TypeCheckError(f'Unknown table {name!r}')
             return {alias: schema[name]}
-        case Join(condition, left, right):
-            env = resolve_source(left, schema) | resolve_source(right, schema)
-            check_condition(condition, env)
-            return env
+        case Join(_, left, right):
+            return source_env(left, schema) | source_env(right, schema)
         case _: raise TypeCheckError(f'Unknown source: {s!r}')
+
+def check_joins(s: Source, env: Env) -> None:
+    """Join conditions resolve against the whole FROM clause, not just the subtree they
+    hang off. Inner joins are one conjunction; the nesting is the model's parenthesisation,
+    and `checks.validate` and `optimizer.lower` both already read it that way (lowering
+    renders the tree flat). A condition on `doc_high` written one level below where
+    `doc_high` is joined is a legal query with an odd tree, not a scope error."""
+    if isinstance(s, Join):
+        check_condition(s.condition, env)
+        check_joins(s.left, env)
+        check_joins(s.right, env)
+
+def resolve_source(s: Source, schema: Schema) -> Env:
+    env = source_env(s, schema)
+    check_joins(s, env)
+    return env
 
 def typecheck(q: Query, schema: Schema) -> Env:
     """Validate q against schema. Returns the Env for downstream type lookups via resolve_expression."""
