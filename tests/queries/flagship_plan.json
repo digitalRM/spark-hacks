@@ -1,0 +1,4423 @@
+{
+  "snapshots": [
+    {
+      "pass_name": "P0 desugar",
+      "note": "Derived fields expanded into Materialize operators; unnest expanded into Expand/Collapse pairs.",
+      "plan": {
+        "node_id": "n6",
+        "label": "Project(2)",
+        "grain": [
+          "cluster"
+        ],
+        "children": [
+          {
+            "node_id": "n5",
+            "label": "Limit(10)",
+            "grain": [
+              "cluster"
+            ],
+            "children": [
+              {
+                "node_id": "n3c",
+                "label": "Collapse(cluster)",
+                "grain": [
+                  "cluster"
+                ],
+                "children": [
+                  {
+                    "node_id": "n3",
+                    "label": "FUZZY",
+                    "grain": [
+                      "cluster",
+                      "segments"
+                    ],
+                    "children": [
+                      {
+                        "node_id": "n3e",
+                        "label": "Expand(audio.segments)",
+                        "grain": [
+                          "cluster",
+                          "segments"
+                        ],
+                        "children": [
+                          {
+                            "node_id": "n3m",
+                            "label": "Materialize(asr)",
+                            "grain": [
+                              "cluster"
+                            ],
+                            "children": [
+                              {
+                                "node_id": "n4c",
+                                "label": "Collapse(cluster)",
+                                "grain": [
+                                  "cluster"
+                                ],
+                                "children": [
+                                  {
+                                    "node_id": "n4",
+                                    "label": "FUZZY",
+                                    "grain": [
+                                      "cluster",
+                                      "scan_pages"
+                                    ],
+                                    "children": [
+                                      {
+                                        "node_id": "n4e",
+                                        "label": "Expand(cluster.scan_pages)",
+                                        "grain": [
+                                          "cluster",
+                                          "scan_pages"
+                                        ],
+                                        "children": [
+                                          {
+                                            "node_id": "n4m",
+                                            "label": "Materialize(rasterize)",
+                                            "grain": [
+                                              "cluster"
+                                            ],
+                                            "children": [
+                                              {
+                                                "node_id": "n2",
+                                                "label": "FUZZY",
+                                                "grain": [
+                                                  "cluster"
+                                                ],
+                                                "children": [
+                                                  {
+                                                    "node_id": "n0c",
+                                                    "label": "EXACT(EXACT(citation.cited_cite = \"490 U.S. 386\"))",
+                                                    "grain": [
+                                                      "cluster"
+                                                    ],
+                                                    "children": [
+                                                      {
+                                                        "node_id": "n0b",
+                                                        "label": "EXACT(EXACT(cluster.date_filed >= \"2022-01-01\"))",
+                                                        "grain": [
+                                                          "cluster"
+                                                        ],
+                                                        "children": [
+                                                          {
+                                                            "node_id": "n0a",
+                                                            "label": "EXACT(EXACT(docket.court_id = \"ca9\"))",
+                                                            "grain": [
+                                                              "cluster"
+                                                            ],
+                                                            "children": [
+                                                              {
+                                                                "node_id": "n0",
+                                                                "label": "Scan(cluster, docket, opinion, citation)",
+                                                                "grain": [
+                                                                  "cluster"
+                                                                ],
+                                                                "children": [],
+                                                                "node": "scan",
+                                                                "tables": [
+                                                                  "cluster",
+                                                                  "docket",
+                                                                  "opinion",
+                                                                  "citation"
+                                                                ],
+                                                                "sql": "SELECT c.id, c.case_name, c.scan_pdf_url, d.id AS docket_id\n  FROM cluster c\n  JOIN docket d ON c.docket_id = d.id\n  JOIN opinion o ON o.cluster_id = c.id\n  JOIN citation ct ON ct.citing_opinion_id = o.id",
+                                                                "params": [],
+                                                                "pushed": [],
+                                                                "selectivity": 1.0,
+                                                                "selectivity_source": "static"
+                                                              }
+                                                            ],
+                                                            "node": "exact_filter",
+                                                            "predicate": "EXACT(docket.court_id = \"ca9\")",
+                                                            "selectivity": 0.11
+                                                          }
+                                                        ],
+                                                        "node": "exact_filter",
+                                                        "predicate": "EXACT(cluster.date_filed >= \"2022-01-01\")",
+                                                        "selectivity": 0.34
+                                                      }
+                                                    ],
+                                                    "node": "exact_filter",
+                                                    "predicate": "EXACT(citation.cited_cite = \"490 U.S. 386\")",
+                                                    "selectivity": 0.22
+                                                  }
+                                                ],
+                                                "node": "semantic_filter",
+                                                "predicate_class": "fuzzy",
+                                                "field": {
+                                                  "source": "opinion",
+                                                  "path": [
+                                                    "plain_text"
+                                                  ]
+                                                },
+                                                "text": "the opinion analyzes qualified immunity for excessive force",
+                                                "negated": false,
+                                                "bound_model": "UNVERIFIED-oracle-remote",
+                                                "binding_reason": "not yet bound \u2014 costed at the heaviest eligible model (the naive plan)",
+                                                "selectivity": 0.5,
+                                                "selectivity_source": "static",
+                                                "escalation_fraction": null,
+                                                "early_exit": false
+                                              }
+                                            ],
+                                            "node": "materialize",
+                                            "source": {
+                                              "source": "cluster",
+                                              "path": [
+                                                "scan_pdf_url"
+                                              ]
+                                            },
+                                            "produces": {
+                                              "source": "cluster",
+                                              "path": [
+                                                "scan_pages"
+                                              ]
+                                            },
+                                            "method": "rasterize",
+                                            "bound_model": "bespoke:pdf-raster",
+                                            "binding_reason": "deterministic, no model"
+                                          }
+                                        ],
+                                        "node": "expand",
+                                        "field": {
+                                          "source": "cluster",
+                                          "path": [
+                                            "scan_pages"
+                                          ]
+                                        },
+                                        "fanout": 47.0,
+                                        "fanout_provenance": "placeholder"
+                                      }
+                                    ],
+                                    "node": "semantic_filter",
+                                    "predicate_class": "fuzzy",
+                                    "field": {
+                                      "source": "cluster",
+                                      "path": [
+                                        "scan_pages"
+                                      ]
+                                    },
+                                    "text": "the page contains a photographic exhibit",
+                                    "negated": false,
+                                    "bound_model": "UNVERIFIED-oracle-remote",
+                                    "binding_reason": "not yet bound \u2014 costed at the heaviest eligible model (the naive plan)",
+                                    "selectivity": 0.5,
+                                    "selectivity_source": "static",
+                                    "escalation_fraction": null,
+                                    "early_exit": false
+                                  }
+                                ],
+                                "node": "collapse"
+                              }
+                            ],
+                            "node": "materialize",
+                            "source": {
+                              "source": "docket",
+                              "path": [
+                                "argument_audio"
+                              ]
+                            },
+                            "produces": {
+                              "source": "audio",
+                              "path": [
+                                "segments"
+                              ]
+                            },
+                            "method": "asr",
+                            "bound_model": "UNVERIFIED-asr-local",
+                            "binding_reason": "transcription dominates the audio predicate"
+                          }
+                        ],
+                        "node": "expand",
+                        "field": {
+                          "source": "audio",
+                          "path": [
+                            "segments"
+                          ]
+                        },
+                        "fanout": 320.0,
+                        "fanout_provenance": "placeholder"
+                      }
+                    ],
+                    "node": "semantic_filter",
+                    "predicate_class": "fuzzy",
+                    "field": {
+                      "source": "audio",
+                      "path": [
+                        "segments"
+                      ]
+                    },
+                    "text": "a judge expressed skepticism",
+                    "negated": false,
+                    "bound_model": "UNVERIFIED-oracle-remote",
+                    "binding_reason": "not yet bound \u2014 costed at the heaviest eligible model (the naive plan)",
+                    "selectivity": 0.5,
+                    "selectivity_source": "static",
+                    "escalation_fraction": null,
+                    "early_exit": false
+                  }
+                ],
+                "node": "collapse"
+              }
+            ],
+            "node": "limit",
+            "k": 10,
+            "early_exit": false
+          }
+        ],
+        "node": "project",
+        "columns": [
+          {
+            "label": "cluster_id",
+            "ref": {
+              "source": "cluster",
+              "path": [
+                "id"
+              ]
+            },
+            "unnest": false,
+            "agg": null
+          },
+          {
+            "label": "case_name",
+            "ref": {
+              "source": "cluster",
+              "path": [
+                "case_name"
+              ]
+            },
+            "unnest": false,
+            "agg": null
+          }
+        ]
+      },
+      "estimate": {
+        "provenance": "placeholder",
+        "seconds": 18883.203334902184,
+        "model_calls": 7587.2165247999765,
+        "remote_calls": 7494.983935999976,
+        "rows_in": 32000.0,
+        "rows_out": 10.0,
+        "stages": [
+          {
+            "node_id": "n0",
+            "rows_in": 32000.0,
+            "rows_out": 32000.0,
+            "model_calls": 0.0,
+            "seconds": 0.00384,
+            "provenance": "placeholder",
+            "remote_calls": 0.0,
+            "cache_hits": 0,
+            "degraded": 0
+          },
+          {
+            "node_id": "n0a",
+            "rows_in": 32000.0,
+            "rows_out": 3520.0,
+            "model_calls": 0.0,
+            "seconds": 25.6,
+            "provenance": "placeholder",
+            "remote_calls": 0.0,
+            "cache_hits": 0,
+            "degraded": 0
+          },
+          {
+            "node_id": "n0b",
+            "rows_in": 3520.0,
+            "rows_out": 1196.8000000000002,
+            "model_calls": 0.0,
+            "seconds": 2.8160000000000003,
+            "provenance": "placeholder",
+            "remote_calls": 0.0,
+            "cache_hits": 0,
+            "degraded": 0
+          },
+          {
+            "node_id": "n0c",
+            "rows_in": 1196.8000000000002,
+            "rows_out": 263.29600000000005,
+            "model_calls": 0.0,
+            "seconds": 0.9574400000000002,
+            "provenance": "placeholder",
+            "remote_calls": 0.0,
+            "cache_hits": 0,
+            "degraded": 0
+          },
+          {
+            "node_id": "n2",
+            "rows_in": 263.29600000000005,
+            "rows_out": 131.64800000000002,
+            "model_calls": 263.29600000000005,
+            "seconds": 626.8952380952383,
+            "provenance": "placeholder",
+            "remote_calls": 263.29600000000005,
+            "cache_hits": 0,
+            "degraded": 0
+          },
+          {
+            "node_id": "n4m",
+            "rows_in": 131.64800000000002,
+            "rows_out": 81.62176000000001,
+            "model_calls": 81.62176000000001,
+            "seconds": 2.53027456,
+            "provenance": "placeholder",
+            "remote_calls": 0.0,
+            "cache_hits": 0,
+            "degraded": 0
+          },
+          {
+            "node_id": "n4e",
+            "rows_in": 81.62176000000001,
+            "rows_out": 3836.22272,
+            "model_calls": 0.0,
+            "seconds": 3.0689781760000003,
+            "provenance": "placeholder",
+            "remote_calls": 0.0,
+            "cache_hits": 0,
+            "degraded": 0
+          },
+          {
+            "node_id": "n4",
+            "rows_in": 3836.22272,
+            "rows_out": 1918.11136,
+            "model_calls": 3836.22272,
+            "seconds": 9133.863619047619,
+            "provenance": "placeholder",
+            "remote_calls": 3836.22272,
+            "cache_hits": 0,
+            "degraded": 0
+          },
+          {
+            "node_id": "n4c",
+            "rows_in": 1918.11136,
+            "rows_out": 81.62175999999943,
+            "model_calls": 0.0,
+            "seconds": 1.5344890880000002,
+            "provenance": "placeholder",
+            "remote_calls": 0.0,
+            "cache_hits": 0,
+            "degraded": 0
+          },
+          {
+            "node_id": "n3m",
+            "rows_in": 81.62175999999943,
+            "rows_out": 10.610828799999926,
+            "model_calls": 10.610828799999926,
+            "seconds": 997.417907199993,
+            "provenance": "placeholder",
+            "remote_calls": 0.0,
+            "cache_hits": 0,
+            "degraded": 0
+          },
+          {
+            "node_id": "n3e",
+            "rows_in": 10.610828799999926,
+            "rows_out": 3395.465215999976,
+            "model_calls": 0.0,
+            "seconds": 2.7163721727999808,
+            "provenance": "placeholder",
+            "remote_calls": 0.0,
+            "cache_hits": 0,
+            "degraded": 0
+          },
+          {
+            "node_id": "n3",
+            "rows_in": 3395.465215999976,
+            "rows_out": 1697.732607999988,
+            "model_calls": 3395.465215999976,
+            "seconds": 8084.440990476133,
+            "provenance": "placeholder",
+            "remote_calls": 3395.465215999976,
+            "cache_hits": 0,
+            "degraded": 0
+          },
+          {
+            "node_id": "n3c",
+            "rows_in": 1697.732607999988,
+            "rows_out": 10.610828799999926,
+            "model_calls": 0.0,
+            "seconds": 1.3581860863999904,
+            "provenance": "placeholder",
+            "remote_calls": 0.0,
+            "cache_hits": 0,
+            "degraded": 0
+          },
+          {
+            "node_id": "n5",
+            "rows_in": 10.610828799999926,
+            "rows_out": 10.0,
+            "model_calls": 0.0,
+            "seconds": 0.0,
+            "provenance": "placeholder",
+            "remote_calls": 0.0,
+            "cache_hits": 0,
+            "degraded": 0
+          },
+          {
+            "node_id": "n6",
+            "rows_in": 10.0,
+            "rows_out": 10.0,
+            "model_calls": 0.0,
+            "seconds": 0.0,
+            "provenance": "placeholder",
+            "remote_calls": 0.0,
+            "cache_hits": 0,
+            "degraded": 0
+          }
+        ]
+      }
+    },
+    {
+      "pass_name": "P1 normalize",
+      "note": "The WHERE is already a pure conjunction, so negation-normal form and DNF are no-ops. A query with OR would become a Union of clauses.",
+      "plan": {
+        "node_id": "n6",
+        "label": "Project(2)",
+        "grain": [
+          "cluster"
+        ],
+        "children": [
+          {
+            "node_id": "n5",
+            "label": "Limit(10)",
+            "grain": [
+              "cluster"
+            ],
+            "children": [
+              {
+                "node_id": "n3c",
+                "label": "Collapse(cluster)",
+                "grain": [
+                  "cluster"
+                ],
+                "children": [
+                  {
+                    "node_id": "n3",
+                    "label": "FUZZY",
+                    "grain": [
+                      "cluster",
+                      "segments"
+                    ],
+                    "children": [
+                      {
+                        "node_id": "n3e",
+                        "label": "Expand(audio.segments)",
+                        "grain": [
+                          "cluster",
+                          "segments"
+                        ],
+                        "children": [
+                          {
+                            "node_id": "n3m",
+                            "label": "Materialize(asr)",
+                            "grain": [
+                              "cluster"
+                            ],
+                            "children": [
+                              {
+                                "node_id": "n4c",
+                                "label": "Collapse(cluster)",
+                                "grain": [
+                                  "cluster"
+                                ],
+                                "children": [
+                                  {
+                                    "node_id": "n4",
+                                    "label": "FUZZY",
+                                    "grain": [
+                                      "cluster",
+                                      "scan_pages"
+                                    ],
+                                    "children": [
+                                      {
+                                        "node_id": "n4e",
+                                        "label": "Expand(cluster.scan_pages)",
+                                        "grain": [
+                                          "cluster",
+                                          "scan_pages"
+                                        ],
+                                        "children": [
+                                          {
+                                            "node_id": "n4m",
+                                            "label": "Materialize(rasterize)",
+                                            "grain": [
+                                              "cluster"
+                                            ],
+                                            "children": [
+                                              {
+                                                "node_id": "n2",
+                                                "label": "FUZZY",
+                                                "grain": [
+                                                  "cluster"
+                                                ],
+                                                "children": [
+                                                  {
+                                                    "node_id": "n0c",
+                                                    "label": "EXACT(EXACT(citation.cited_cite = \"490 U.S. 386\"))",
+                                                    "grain": [
+                                                      "cluster"
+                                                    ],
+                                                    "children": [
+                                                      {
+                                                        "node_id": "n0b",
+                                                        "label": "EXACT(EXACT(cluster.date_filed >= \"2022-01-01\"))",
+                                                        "grain": [
+                                                          "cluster"
+                                                        ],
+                                                        "children": [
+                                                          {
+                                                            "node_id": "n0a",
+                                                            "label": "EXACT(EXACT(docket.court_id = \"ca9\"))",
+                                                            "grain": [
+                                                              "cluster"
+                                                            ],
+                                                            "children": [
+                                                              {
+                                                                "node_id": "n0",
+                                                                "label": "Scan(cluster, docket, opinion, citation)",
+                                                                "grain": [
+                                                                  "cluster"
+                                                                ],
+                                                                "children": [],
+                                                                "node": "scan",
+                                                                "tables": [
+                                                                  "cluster",
+                                                                  "docket",
+                                                                  "opinion",
+                                                                  "citation"
+                                                                ],
+                                                                "sql": "SELECT c.id, c.case_name, c.scan_pdf_url, d.id AS docket_id\n  FROM cluster c\n  JOIN docket d ON c.docket_id = d.id\n  JOIN opinion o ON o.cluster_id = c.id\n  JOIN citation ct ON ct.citing_opinion_id = o.id",
+                                                                "params": [],
+                                                                "pushed": [],
+                                                                "selectivity": 1.0,
+                                                                "selectivity_source": "static"
+                                                              }
+                                                            ],
+                                                            "node": "exact_filter",
+                                                            "predicate": "EXACT(docket.court_id = \"ca9\")",
+                                                            "selectivity": 0.11
+                                                          }
+                                                        ],
+                                                        "node": "exact_filter",
+                                                        "predicate": "EXACT(cluster.date_filed >= \"2022-01-01\")",
+                                                        "selectivity": 0.34
+                                                      }
+                                                    ],
+                                                    "node": "exact_filter",
+                                                    "predicate": "EXACT(citation.cited_cite = \"490 U.S. 386\")",
+                                                    "selectivity": 0.22
+                                                  }
+                                                ],
+                                                "node": "semantic_filter",
+                                                "predicate_class": "fuzzy",
+                                                "field": {
+                                                  "source": "opinion",
+                                                  "path": [
+                                                    "plain_text"
+                                                  ]
+                                                },
+                                                "text": "the opinion analyzes qualified immunity for excessive force",
+                                                "negated": false,
+                                                "bound_model": "UNVERIFIED-oracle-remote",
+                                                "binding_reason": "not yet bound \u2014 costed at the heaviest eligible model (the naive plan)",
+                                                "selectivity": 0.5,
+                                                "selectivity_source": "static",
+                                                "escalation_fraction": null,
+                                                "early_exit": false
+                                              }
+                                            ],
+                                            "node": "materialize",
+                                            "source": {
+                                              "source": "cluster",
+                                              "path": [
+                                                "scan_pdf_url"
+                                              ]
+                                            },
+                                            "produces": {
+                                              "source": "cluster",
+                                              "path": [
+                                                "scan_pages"
+                                              ]
+                                            },
+                                            "method": "rasterize",
+                                            "bound_model": "bespoke:pdf-raster",
+                                            "binding_reason": "deterministic, no model"
+                                          }
+                                        ],
+                                        "node": "expand",
+                                        "field": {
+                                          "source": "cluster",
+                                          "path": [
+                                            "scan_pages"
+                                          ]
+                                        },
+                                        "fanout": 47.0,
+                                        "fanout_provenance": "placeholder"
+                                      }
+                                    ],
+                                    "node": "semantic_filter",
+                                    "predicate_class": "fuzzy",
+                                    "field": {
+                                      "source": "cluster",
+                                      "path": [
+                                        "scan_pages"
+                                      ]
+                                    },
+                                    "text": "the page contains a photographic exhibit",
+                                    "negated": false,
+                                    "bound_model": "UNVERIFIED-oracle-remote",
+                                    "binding_reason": "not yet bound \u2014 costed at the heaviest eligible model (the naive plan)",
+                                    "selectivity": 0.5,
+                                    "selectivity_source": "static",
+                                    "escalation_fraction": null,
+                                    "early_exit": false
+                                  }
+                                ],
+                                "node": "collapse"
+                              }
+                            ],
+                            "node": "materialize",
+                            "source": {
+                              "source": "docket",
+                              "path": [
+                                "argument_audio"
+                              ]
+                            },
+                            "produces": {
+                              "source": "audio",
+                              "path": [
+                                "segments"
+                              ]
+                            },
+                            "method": "asr",
+                            "bound_model": "UNVERIFIED-asr-local",
+                            "binding_reason": "transcription dominates the audio predicate"
+                          }
+                        ],
+                        "node": "expand",
+                        "field": {
+                          "source": "audio",
+                          "path": [
+                            "segments"
+                          ]
+                        },
+                        "fanout": 320.0,
+                        "fanout_provenance": "placeholder"
+                      }
+                    ],
+                    "node": "semantic_filter",
+                    "predicate_class": "fuzzy",
+                    "field": {
+                      "source": "audio",
+                      "path": [
+                        "segments"
+                      ]
+                    },
+                    "text": "a judge expressed skepticism",
+                    "negated": false,
+                    "bound_model": "UNVERIFIED-oracle-remote",
+                    "binding_reason": "not yet bound \u2014 costed at the heaviest eligible model (the naive plan)",
+                    "selectivity": 0.5,
+                    "selectivity_source": "static",
+                    "escalation_fraction": null,
+                    "early_exit": false
+                  }
+                ],
+                "node": "collapse"
+              }
+            ],
+            "node": "limit",
+            "k": 10,
+            "early_exit": false
+          }
+        ],
+        "node": "project",
+        "columns": [
+          {
+            "label": "cluster_id",
+            "ref": {
+              "source": "cluster",
+              "path": [
+                "id"
+              ]
+            },
+            "unnest": false,
+            "agg": null
+          },
+          {
+            "label": "case_name",
+            "ref": {
+              "source": "cluster",
+              "path": [
+                "case_name"
+              ]
+            },
+            "unnest": false,
+            "agg": null
+          }
+        ]
+      },
+      "estimate": {
+        "provenance": "placeholder",
+        "seconds": 18883.203334902184,
+        "model_calls": 7587.2165247999765,
+        "remote_calls": 7494.983935999976,
+        "rows_in": 32000.0,
+        "rows_out": 10.0,
+        "stages": [
+          {
+            "node_id": "n0",
+            "rows_in": 32000.0,
+            "rows_out": 32000.0,
+            "model_calls": 0.0,
+            "seconds": 0.00384,
+            "provenance": "placeholder",
+            "remote_calls": 0.0,
+            "cache_hits": 0,
+            "degraded": 0
+          },
+          {
+            "node_id": "n0a",
+            "rows_in": 32000.0,
+            "rows_out": 3520.0,
+            "model_calls": 0.0,
+            "seconds": 25.6,
+            "provenance": "placeholder",
+            "remote_calls": 0.0,
+            "cache_hits": 0,
+            "degraded": 0
+          },
+          {
+            "node_id": "n0b",
+            "rows_in": 3520.0,
+            "rows_out": 1196.8000000000002,
+            "model_calls": 0.0,
+            "seconds": 2.8160000000000003,
+            "provenance": "placeholder",
+            "remote_calls": 0.0,
+            "cache_hits": 0,
+            "degraded": 0
+          },
+          {
+            "node_id": "n0c",
+            "rows_in": 1196.8000000000002,
+            "rows_out": 263.29600000000005,
+            "model_calls": 0.0,
+            "seconds": 0.9574400000000002,
+            "provenance": "placeholder",
+            "remote_calls": 0.0,
+            "cache_hits": 0,
+            "degraded": 0
+          },
+          {
+            "node_id": "n2",
+            "rows_in": 263.29600000000005,
+            "rows_out": 131.64800000000002,
+            "model_calls": 263.29600000000005,
+            "seconds": 626.8952380952383,
+            "provenance": "placeholder",
+            "remote_calls": 263.29600000000005,
+            "cache_hits": 0,
+            "degraded": 0
+          },
+          {
+            "node_id": "n4m",
+            "rows_in": 131.64800000000002,
+            "rows_out": 81.62176000000001,
+            "model_calls": 81.62176000000001,
+            "seconds": 2.53027456,
+            "provenance": "placeholder",
+            "remote_calls": 0.0,
+            "cache_hits": 0,
+            "degraded": 0
+          },
+          {
+            "node_id": "n4e",
+            "rows_in": 81.62176000000001,
+            "rows_out": 3836.22272,
+            "model_calls": 0.0,
+            "seconds": 3.0689781760000003,
+            "provenance": "placeholder",
+            "remote_calls": 0.0,
+            "cache_hits": 0,
+            "degraded": 0
+          },
+          {
+            "node_id": "n4",
+            "rows_in": 3836.22272,
+            "rows_out": 1918.11136,
+            "model_calls": 3836.22272,
+            "seconds": 9133.863619047619,
+            "provenance": "placeholder",
+            "remote_calls": 3836.22272,
+            "cache_hits": 0,
+            "degraded": 0
+          },
+          {
+            "node_id": "n4c",
+            "rows_in": 1918.11136,
+            "rows_out": 81.62175999999943,
+            "model_calls": 0.0,
+            "seconds": 1.5344890880000002,
+            "provenance": "placeholder",
+            "remote_calls": 0.0,
+            "cache_hits": 0,
+            "degraded": 0
+          },
+          {
+            "node_id": "n3m",
+            "rows_in": 81.62175999999943,
+            "rows_out": 10.610828799999926,
+            "model_calls": 10.610828799999926,
+            "seconds": 997.417907199993,
+            "provenance": "placeholder",
+            "remote_calls": 0.0,
+            "cache_hits": 0,
+            "degraded": 0
+          },
+          {
+            "node_id": "n3e",
+            "rows_in": 10.610828799999926,
+            "rows_out": 3395.465215999976,
+            "model_calls": 0.0,
+            "seconds": 2.7163721727999808,
+            "provenance": "placeholder",
+            "remote_calls": 0.0,
+            "cache_hits": 0,
+            "degraded": 0
+          },
+          {
+            "node_id": "n3",
+            "rows_in": 3395.465215999976,
+            "rows_out": 1697.732607999988,
+            "model_calls": 3395.465215999976,
+            "seconds": 8084.440990476133,
+            "provenance": "placeholder",
+            "remote_calls": 3395.465215999976,
+            "cache_hits": 0,
+            "degraded": 0
+          },
+          {
+            "node_id": "n3c",
+            "rows_in": 1697.732607999988,
+            "rows_out": 10.610828799999926,
+            "model_calls": 0.0,
+            "seconds": 1.3581860863999904,
+            "provenance": "placeholder",
+            "remote_calls": 0.0,
+            "cache_hits": 0,
+            "degraded": 0
+          },
+          {
+            "node_id": "n5",
+            "rows_in": 10.610828799999926,
+            "rows_out": 10.0,
+            "model_calls": 0.0,
+            "seconds": 0.0,
+            "provenance": "placeholder",
+            "remote_calls": 0.0,
+            "cache_hits": 0,
+            "degraded": 0
+          },
+          {
+            "node_id": "n6",
+            "rows_in": 10.0,
+            "rows_out": 10.0,
+            "model_calls": 0.0,
+            "seconds": 0.0,
+            "provenance": "placeholder",
+            "remote_calls": 0.0,
+            "cache_hits": 0,
+            "degraded": 0
+          }
+        ]
+      }
+    },
+    {
+      "pass_name": "P2 refine",
+      "note": "FUZZY resolved by field type alone: opinion.plain_text is Text -> SEM, scan_pages is Image -> VISUAL, audio.segments is Audio -> AUDIO. Deterministic, no model call.",
+      "plan": {
+        "node_id": "n6",
+        "label": "Project(2)",
+        "grain": [
+          "cluster"
+        ],
+        "children": [
+          {
+            "node_id": "n5",
+            "label": "Limit(10)",
+            "grain": [
+              "cluster"
+            ],
+            "children": [
+              {
+                "node_id": "n3c",
+                "label": "Collapse(cluster)",
+                "grain": [
+                  "cluster"
+                ],
+                "children": [
+                  {
+                    "node_id": "n3",
+                    "label": "AUDIO",
+                    "grain": [
+                      "cluster",
+                      "segments"
+                    ],
+                    "children": [
+                      {
+                        "node_id": "n3e",
+                        "label": "Expand(audio.segments)",
+                        "grain": [
+                          "cluster",
+                          "segments"
+                        ],
+                        "children": [
+                          {
+                            "node_id": "n3m",
+                            "label": "Materialize(asr)",
+                            "grain": [
+                              "cluster"
+                            ],
+                            "children": [
+                              {
+                                "node_id": "n4c",
+                                "label": "Collapse(cluster)",
+                                "grain": [
+                                  "cluster"
+                                ],
+                                "children": [
+                                  {
+                                    "node_id": "n4",
+                                    "label": "VISUAL",
+                                    "grain": [
+                                      "cluster",
+                                      "scan_pages"
+                                    ],
+                                    "children": [
+                                      {
+                                        "node_id": "n4e",
+                                        "label": "Expand(cluster.scan_pages)",
+                                        "grain": [
+                                          "cluster",
+                                          "scan_pages"
+                                        ],
+                                        "children": [
+                                          {
+                                            "node_id": "n4m",
+                                            "label": "Materialize(rasterize)",
+                                            "grain": [
+                                              "cluster"
+                                            ],
+                                            "children": [
+                                              {
+                                                "node_id": "n2",
+                                                "label": "SEM",
+                                                "grain": [
+                                                  "cluster"
+                                                ],
+                                                "children": [
+                                                  {
+                                                    "node_id": "n0c",
+                                                    "label": "EXACT(EXACT(citation.cited_cite = \"490 U.S. 386\"))",
+                                                    "grain": [
+                                                      "cluster"
+                                                    ],
+                                                    "children": [
+                                                      {
+                                                        "node_id": "n0b",
+                                                        "label": "EXACT(EXACT(cluster.date_filed >= \"2022-01-01\"))",
+                                                        "grain": [
+                                                          "cluster"
+                                                        ],
+                                                        "children": [
+                                                          {
+                                                            "node_id": "n0a",
+                                                            "label": "EXACT(EXACT(docket.court_id = \"ca9\"))",
+                                                            "grain": [
+                                                              "cluster"
+                                                            ],
+                                                            "children": [
+                                                              {
+                                                                "node_id": "n0",
+                                                                "label": "Scan(cluster, docket, opinion, citation)",
+                                                                "grain": [
+                                                                  "cluster"
+                                                                ],
+                                                                "children": [],
+                                                                "node": "scan",
+                                                                "tables": [
+                                                                  "cluster",
+                                                                  "docket",
+                                                                  "opinion",
+                                                                  "citation"
+                                                                ],
+                                                                "sql": "SELECT c.id, c.case_name, c.scan_pdf_url, d.id AS docket_id\n  FROM cluster c\n  JOIN docket d ON c.docket_id = d.id\n  JOIN opinion o ON o.cluster_id = c.id\n  JOIN citation ct ON ct.citing_opinion_id = o.id",
+                                                                "params": [],
+                                                                "pushed": [],
+                                                                "selectivity": 1.0,
+                                                                "selectivity_source": "static"
+                                                              }
+                                                            ],
+                                                            "node": "exact_filter",
+                                                            "predicate": "EXACT(docket.court_id = \"ca9\")",
+                                                            "selectivity": 0.11
+                                                          }
+                                                        ],
+                                                        "node": "exact_filter",
+                                                        "predicate": "EXACT(cluster.date_filed >= \"2022-01-01\")",
+                                                        "selectivity": 0.34
+                                                      }
+                                                    ],
+                                                    "node": "exact_filter",
+                                                    "predicate": "EXACT(citation.cited_cite = \"490 U.S. 386\")",
+                                                    "selectivity": 0.22
+                                                  }
+                                                ],
+                                                "node": "semantic_filter",
+                                                "predicate_class": "sem",
+                                                "field": {
+                                                  "source": "opinion",
+                                                  "path": [
+                                                    "plain_text"
+                                                  ]
+                                                },
+                                                "text": "the opinion analyzes qualified immunity for excessive force",
+                                                "negated": false,
+                                                "bound_model": "UNVERIFIED-oracle-remote",
+                                                "binding_reason": "not yet bound \u2014 costed at the heaviest eligible model (the naive plan)",
+                                                "selectivity": 0.5,
+                                                "selectivity_source": "static",
+                                                "escalation_fraction": null,
+                                                "early_exit": false
+                                              }
+                                            ],
+                                            "node": "materialize",
+                                            "source": {
+                                              "source": "cluster",
+                                              "path": [
+                                                "scan_pdf_url"
+                                              ]
+                                            },
+                                            "produces": {
+                                              "source": "cluster",
+                                              "path": [
+                                                "scan_pages"
+                                              ]
+                                            },
+                                            "method": "rasterize",
+                                            "bound_model": "bespoke:pdf-raster",
+                                            "binding_reason": "deterministic, no model"
+                                          }
+                                        ],
+                                        "node": "expand",
+                                        "field": {
+                                          "source": "cluster",
+                                          "path": [
+                                            "scan_pages"
+                                          ]
+                                        },
+                                        "fanout": 47.0,
+                                        "fanout_provenance": "placeholder"
+                                      }
+                                    ],
+                                    "node": "semantic_filter",
+                                    "predicate_class": "visual",
+                                    "field": {
+                                      "source": "cluster",
+                                      "path": [
+                                        "scan_pages"
+                                      ]
+                                    },
+                                    "text": "the page contains a photographic exhibit",
+                                    "negated": false,
+                                    "bound_model": "UNVERIFIED-oracle-remote",
+                                    "binding_reason": "not yet bound \u2014 costed at the heaviest eligible model (the naive plan)",
+                                    "selectivity": 0.5,
+                                    "selectivity_source": "static",
+                                    "escalation_fraction": null,
+                                    "early_exit": false
+                                  }
+                                ],
+                                "node": "collapse"
+                              }
+                            ],
+                            "node": "materialize",
+                            "source": {
+                              "source": "docket",
+                              "path": [
+                                "argument_audio"
+                              ]
+                            },
+                            "produces": {
+                              "source": "audio",
+                              "path": [
+                                "segments"
+                              ]
+                            },
+                            "method": "asr",
+                            "bound_model": "UNVERIFIED-asr-local",
+                            "binding_reason": "transcription dominates the audio predicate"
+                          }
+                        ],
+                        "node": "expand",
+                        "field": {
+                          "source": "audio",
+                          "path": [
+                            "segments"
+                          ]
+                        },
+                        "fanout": 320.0,
+                        "fanout_provenance": "placeholder"
+                      }
+                    ],
+                    "node": "semantic_filter",
+                    "predicate_class": "audio",
+                    "field": {
+                      "source": "audio",
+                      "path": [
+                        "segments"
+                      ]
+                    },
+                    "text": "a judge expressed skepticism",
+                    "negated": false,
+                    "bound_model": "UNVERIFIED-oracle-remote",
+                    "binding_reason": "not yet bound \u2014 costed at the heaviest eligible model (the naive plan)",
+                    "selectivity": 0.5,
+                    "selectivity_source": "static",
+                    "escalation_fraction": null,
+                    "early_exit": false
+                  }
+                ],
+                "node": "collapse"
+              }
+            ],
+            "node": "limit",
+            "k": 10,
+            "early_exit": false
+          }
+        ],
+        "node": "project",
+        "columns": [
+          {
+            "label": "cluster_id",
+            "ref": {
+              "source": "cluster",
+              "path": [
+                "id"
+              ]
+            },
+            "unnest": false,
+            "agg": null
+          },
+          {
+            "label": "case_name",
+            "ref": {
+              "source": "cluster",
+              "path": [
+                "case_name"
+              ]
+            },
+            "unnest": false,
+            "agg": null
+          }
+        ]
+      },
+      "estimate": {
+        "provenance": "placeholder",
+        "seconds": 18883.203334902184,
+        "model_calls": 7587.2165247999765,
+        "remote_calls": 7494.983935999976,
+        "rows_in": 32000.0,
+        "rows_out": 10.0,
+        "stages": [
+          {
+            "node_id": "n0",
+            "rows_in": 32000.0,
+            "rows_out": 32000.0,
+            "model_calls": 0.0,
+            "seconds": 0.00384,
+            "provenance": "placeholder",
+            "remote_calls": 0.0,
+            "cache_hits": 0,
+            "degraded": 0
+          },
+          {
+            "node_id": "n0a",
+            "rows_in": 32000.0,
+            "rows_out": 3520.0,
+            "model_calls": 0.0,
+            "seconds": 25.6,
+            "provenance": "placeholder",
+            "remote_calls": 0.0,
+            "cache_hits": 0,
+            "degraded": 0
+          },
+          {
+            "node_id": "n0b",
+            "rows_in": 3520.0,
+            "rows_out": 1196.8000000000002,
+            "model_calls": 0.0,
+            "seconds": 2.8160000000000003,
+            "provenance": "placeholder",
+            "remote_calls": 0.0,
+            "cache_hits": 0,
+            "degraded": 0
+          },
+          {
+            "node_id": "n0c",
+            "rows_in": 1196.8000000000002,
+            "rows_out": 263.29600000000005,
+            "model_calls": 0.0,
+            "seconds": 0.9574400000000002,
+            "provenance": "placeholder",
+            "remote_calls": 0.0,
+            "cache_hits": 0,
+            "degraded": 0
+          },
+          {
+            "node_id": "n2",
+            "rows_in": 263.29600000000005,
+            "rows_out": 131.64800000000002,
+            "model_calls": 263.29600000000005,
+            "seconds": 626.8952380952383,
+            "provenance": "placeholder",
+            "remote_calls": 263.29600000000005,
+            "cache_hits": 0,
+            "degraded": 0
+          },
+          {
+            "node_id": "n4m",
+            "rows_in": 131.64800000000002,
+            "rows_out": 81.62176000000001,
+            "model_calls": 81.62176000000001,
+            "seconds": 2.53027456,
+            "provenance": "placeholder",
+            "remote_calls": 0.0,
+            "cache_hits": 0,
+            "degraded": 0
+          },
+          {
+            "node_id": "n4e",
+            "rows_in": 81.62176000000001,
+            "rows_out": 3836.22272,
+            "model_calls": 0.0,
+            "seconds": 3.0689781760000003,
+            "provenance": "placeholder",
+            "remote_calls": 0.0,
+            "cache_hits": 0,
+            "degraded": 0
+          },
+          {
+            "node_id": "n4",
+            "rows_in": 3836.22272,
+            "rows_out": 1918.11136,
+            "model_calls": 3836.22272,
+            "seconds": 9133.863619047619,
+            "provenance": "placeholder",
+            "remote_calls": 3836.22272,
+            "cache_hits": 0,
+            "degraded": 0
+          },
+          {
+            "node_id": "n4c",
+            "rows_in": 1918.11136,
+            "rows_out": 81.62175999999943,
+            "model_calls": 0.0,
+            "seconds": 1.5344890880000002,
+            "provenance": "placeholder",
+            "remote_calls": 0.0,
+            "cache_hits": 0,
+            "degraded": 0
+          },
+          {
+            "node_id": "n3m",
+            "rows_in": 81.62175999999943,
+            "rows_out": 10.610828799999926,
+            "model_calls": 10.610828799999926,
+            "seconds": 997.417907199993,
+            "provenance": "placeholder",
+            "remote_calls": 0.0,
+            "cache_hits": 0,
+            "degraded": 0
+          },
+          {
+            "node_id": "n3e",
+            "rows_in": 10.610828799999926,
+            "rows_out": 3395.465215999976,
+            "model_calls": 0.0,
+            "seconds": 2.7163721727999808,
+            "provenance": "placeholder",
+            "remote_calls": 0.0,
+            "cache_hits": 0,
+            "degraded": 0
+          },
+          {
+            "node_id": "n3",
+            "rows_in": 3395.465215999976,
+            "rows_out": 1697.732607999988,
+            "model_calls": 3395.465215999976,
+            "seconds": 8084.440990476133,
+            "provenance": "placeholder",
+            "remote_calls": 3395.465215999976,
+            "cache_hits": 0,
+            "degraded": 0
+          },
+          {
+            "node_id": "n3c",
+            "rows_in": 1697.732607999988,
+            "rows_out": 10.610828799999926,
+            "model_calls": 0.0,
+            "seconds": 1.3581860863999904,
+            "provenance": "placeholder",
+            "remote_calls": 0.0,
+            "cache_hits": 0,
+            "degraded": 0
+          },
+          {
+            "node_id": "n5",
+            "rows_in": 10.610828799999926,
+            "rows_out": 10.0,
+            "model_calls": 0.0,
+            "seconds": 0.0,
+            "provenance": "placeholder",
+            "remote_calls": 0.0,
+            "cache_hits": 0,
+            "degraded": 0
+          },
+          {
+            "node_id": "n6",
+            "rows_in": 10.0,
+            "rows_out": 10.0,
+            "model_calls": 0.0,
+            "seconds": 0.0,
+            "provenance": "placeholder",
+            "remote_calls": 0.0,
+            "cache_hits": 0,
+            "degraded": 0
+          }
+        ]
+      }
+    },
+    {
+      "pass_name": "P3 pushdown",
+      "note": "Three EXACT predicates and two foreign-key joins absorbed into one SQL statement: 32,000 clusters -> 262 candidates for zero model calls.",
+      "plan": {
+        "node_id": "n6",
+        "label": "Project(2)",
+        "grain": [
+          "cluster"
+        ],
+        "children": [
+          {
+            "node_id": "n5",
+            "label": "Limit(10)",
+            "grain": [
+              "cluster"
+            ],
+            "children": [
+              {
+                "node_id": "n3c",
+                "label": "Collapse(cluster)",
+                "grain": [
+                  "cluster"
+                ],
+                "children": [
+                  {
+                    "node_id": "n3",
+                    "label": "AUDIO",
+                    "grain": [
+                      "cluster",
+                      "segments"
+                    ],
+                    "children": [
+                      {
+                        "node_id": "n3e",
+                        "label": "Expand(audio.segments)",
+                        "grain": [
+                          "cluster",
+                          "segments"
+                        ],
+                        "children": [
+                          {
+                            "node_id": "n3m",
+                            "label": "Materialize(asr)",
+                            "grain": [
+                              "cluster"
+                            ],
+                            "children": [
+                              {
+                                "node_id": "n4c",
+                                "label": "Collapse(cluster)",
+                                "grain": [
+                                  "cluster"
+                                ],
+                                "children": [
+                                  {
+                                    "node_id": "n4",
+                                    "label": "VISUAL",
+                                    "grain": [
+                                      "cluster",
+                                      "scan_pages"
+                                    ],
+                                    "children": [
+                                      {
+                                        "node_id": "n4e",
+                                        "label": "Expand(cluster.scan_pages)",
+                                        "grain": [
+                                          "cluster",
+                                          "scan_pages"
+                                        ],
+                                        "children": [
+                                          {
+                                            "node_id": "n4m",
+                                            "label": "Materialize(rasterize)",
+                                            "grain": [
+                                              "cluster"
+                                            ],
+                                            "children": [
+                                              {
+                                                "node_id": "n2",
+                                                "label": "SEM",
+                                                "grain": [
+                                                  "cluster"
+                                                ],
+                                                "children": [
+                                                  {
+                                                    "node_id": "n0",
+                                                    "label": "Scan(cluster, docket, opinion, citation)",
+                                                    "grain": [
+                                                      "cluster"
+                                                    ],
+                                                    "children": [],
+                                                    "node": "scan",
+                                                    "tables": [
+                                                      "cluster",
+                                                      "docket",
+                                                      "opinion",
+                                                      "citation"
+                                                    ],
+                                                    "sql": "SELECT c.id, c.case_name, c.scan_pdf_url, d.id AS docket_id\n  FROM cluster c\n  JOIN docket d ON c.docket_id = d.id\n  JOIN opinion o ON o.cluster_id = c.id\n  JOIN citation ct ON ct.citing_opinion_id = o.id\n WHERE d.court_id = ? AND c.date_filed >= ? AND ct.cited_cite = ?",
+                                                    "params": [
+                                                      "ca9",
+                                                      "2022-01-01",
+                                                      "490 U.S. 386"
+                                                    ],
+                                                    "pushed": [
+                                                      "docket.court_id = \"ca9\"",
+                                                      "cluster.date_filed >= \"2022-01-01\"",
+                                                      "citation.cited_cite = \"490 U.S. 386\""
+                                                    ],
+                                                    "selectivity": 0.0082,
+                                                    "selectivity_source": "probed"
+                                                  }
+                                                ],
+                                                "node": "semantic_filter",
+                                                "predicate_class": "sem",
+                                                "field": {
+                                                  "source": "opinion",
+                                                  "path": [
+                                                    "plain_text"
+                                                  ]
+                                                },
+                                                "text": "the opinion analyzes qualified immunity for excessive force",
+                                                "negated": false,
+                                                "bound_model": "UNVERIFIED-oracle-remote",
+                                                "binding_reason": "not yet bound \u2014 costed at the heaviest eligible model (the naive plan)",
+                                                "selectivity": 0.5,
+                                                "selectivity_source": "static",
+                                                "escalation_fraction": null,
+                                                "early_exit": false
+                                              }
+                                            ],
+                                            "node": "materialize",
+                                            "source": {
+                                              "source": "cluster",
+                                              "path": [
+                                                "scan_pdf_url"
+                                              ]
+                                            },
+                                            "produces": {
+                                              "source": "cluster",
+                                              "path": [
+                                                "scan_pages"
+                                              ]
+                                            },
+                                            "method": "rasterize",
+                                            "bound_model": "bespoke:pdf-raster",
+                                            "binding_reason": "deterministic, no model"
+                                          }
+                                        ],
+                                        "node": "expand",
+                                        "field": {
+                                          "source": "cluster",
+                                          "path": [
+                                            "scan_pages"
+                                          ]
+                                        },
+                                        "fanout": 47.0,
+                                        "fanout_provenance": "placeholder"
+                                      }
+                                    ],
+                                    "node": "semantic_filter",
+                                    "predicate_class": "visual",
+                                    "field": {
+                                      "source": "cluster",
+                                      "path": [
+                                        "scan_pages"
+                                      ]
+                                    },
+                                    "text": "the page contains a photographic exhibit",
+                                    "negated": false,
+                                    "bound_model": "UNVERIFIED-oracle-remote",
+                                    "binding_reason": "not yet bound \u2014 costed at the heaviest eligible model (the naive plan)",
+                                    "selectivity": 0.5,
+                                    "selectivity_source": "static",
+                                    "escalation_fraction": null,
+                                    "early_exit": false
+                                  }
+                                ],
+                                "node": "collapse"
+                              }
+                            ],
+                            "node": "materialize",
+                            "source": {
+                              "source": "docket",
+                              "path": [
+                                "argument_audio"
+                              ]
+                            },
+                            "produces": {
+                              "source": "audio",
+                              "path": [
+                                "segments"
+                              ]
+                            },
+                            "method": "asr",
+                            "bound_model": "UNVERIFIED-asr-local",
+                            "binding_reason": "transcription dominates the audio predicate"
+                          }
+                        ],
+                        "node": "expand",
+                        "field": {
+                          "source": "audio",
+                          "path": [
+                            "segments"
+                          ]
+                        },
+                        "fanout": 320.0,
+                        "fanout_provenance": "placeholder"
+                      }
+                    ],
+                    "node": "semantic_filter",
+                    "predicate_class": "audio",
+                    "field": {
+                      "source": "audio",
+                      "path": [
+                        "segments"
+                      ]
+                    },
+                    "text": "a judge expressed skepticism",
+                    "negated": false,
+                    "bound_model": "UNVERIFIED-oracle-remote",
+                    "binding_reason": "not yet bound \u2014 costed at the heaviest eligible model (the naive plan)",
+                    "selectivity": 0.5,
+                    "selectivity_source": "static",
+                    "escalation_fraction": null,
+                    "early_exit": false
+                  }
+                ],
+                "node": "collapse"
+              }
+            ],
+            "node": "limit",
+            "k": 10,
+            "early_exit": false
+          }
+        ],
+        "node": "project",
+        "columns": [
+          {
+            "label": "cluster_id",
+            "ref": {
+              "source": "cluster",
+              "path": [
+                "id"
+              ]
+            },
+            "unnest": false,
+            "agg": null
+          },
+          {
+            "label": "case_name",
+            "ref": {
+              "source": "cluster",
+              "path": [
+                "case_name"
+              ]
+            },
+            "unnest": false,
+            "agg": null
+          }
+        ]
+      },
+      "estimate": {
+        "provenance": "placeholder",
+        "seconds": 18789.67005903232,
+        "model_calls": 7561.397119999977,
+        "remote_calls": 7469.478399999977,
+        "rows_in": 32000.0,
+        "rows_out": 10.0,
+        "stages": [
+          {
+            "node_id": "n0",
+            "rows_in": 32000.0,
+            "rows_out": 262.40000000000003,
+            "model_calls": 0.0,
+            "seconds": 0.00384,
+            "provenance": "placeholder",
+            "remote_calls": 0.0,
+            "cache_hits": 0,
+            "degraded": 0
+          },
+          {
+            "node_id": "n2",
+            "rows_in": 262.40000000000003,
+            "rows_out": 131.20000000000002,
+            "model_calls": 262.40000000000003,
+            "seconds": 624.7619047619048,
+            "provenance": "placeholder",
+            "remote_calls": 262.40000000000003,
+            "cache_hits": 0,
+            "degraded": 0
+          },
+          {
+            "node_id": "n4m",
+            "rows_in": 131.20000000000002,
+            "rows_out": 81.34400000000001,
+            "model_calls": 81.34400000000001,
+            "seconds": 2.5216640000000003,
+            "provenance": "placeholder",
+            "remote_calls": 0.0,
+            "cache_hits": 0,
+            "degraded": 0
+          },
+          {
+            "node_id": "n4e",
+            "rows_in": 81.34400000000001,
+            "rows_out": 3823.1680000000006,
+            "model_calls": 0.0,
+            "seconds": 3.0585344000000005,
+            "provenance": "placeholder",
+            "remote_calls": 0.0,
+            "cache_hits": 0,
+            "degraded": 0
+          },
+          {
+            "node_id": "n4",
+            "rows_in": 3823.1680000000006,
+            "rows_out": 1911.5840000000003,
+            "model_calls": 3823.1680000000006,
+            "seconds": 9102.780952380954,
+            "provenance": "placeholder",
+            "remote_calls": 3823.1680000000006,
+            "cache_hits": 0,
+            "degraded": 0
+          },
+          {
+            "node_id": "n4c",
+            "rows_in": 1911.5840000000003,
+            "rows_out": 81.34399999999943,
+            "model_calls": 0.0,
+            "seconds": 1.5292672000000003,
+            "provenance": "placeholder",
+            "remote_calls": 0.0,
+            "cache_hits": 0,
+            "degraded": 0
+          },
+          {
+            "node_id": "n3m",
+            "rows_in": 81.34399999999943,
+            "rows_out": 10.574719999999926,
+            "model_calls": 10.574719999999926,
+            "seconds": 994.0236799999931,
+            "provenance": "placeholder",
+            "remote_calls": 0.0,
+            "cache_hits": 0,
+            "degraded": 0
+          },
+          {
+            "node_id": "n3e",
+            "rows_in": 10.574719999999926,
+            "rows_out": 3383.9103999999766,
+            "model_calls": 0.0,
+            "seconds": 2.707128319999981,
+            "provenance": "placeholder",
+            "remote_calls": 0.0,
+            "cache_hits": 0,
+            "degraded": 0
+          },
+          {
+            "node_id": "n3",
+            "rows_in": 3383.9103999999766,
+            "rows_out": 1691.9551999999883,
+            "model_calls": 3383.9103999999766,
+            "seconds": 8056.929523809468,
+            "provenance": "placeholder",
+            "remote_calls": 3383.9103999999766,
+            "cache_hits": 0,
+            "degraded": 0
+          },
+          {
+            "node_id": "n3c",
+            "rows_in": 1691.9551999999883,
+            "rows_out": 10.574719999999926,
+            "model_calls": 0.0,
+            "seconds": 1.3535641599999906,
+            "provenance": "placeholder",
+            "remote_calls": 0.0,
+            "cache_hits": 0,
+            "degraded": 0
+          },
+          {
+            "node_id": "n5",
+            "rows_in": 10.574719999999926,
+            "rows_out": 10.0,
+            "model_calls": 0.0,
+            "seconds": 0.0,
+            "provenance": "placeholder",
+            "remote_calls": 0.0,
+            "cache_hits": 0,
+            "degraded": 0
+          },
+          {
+            "node_id": "n6",
+            "rows_in": 10.0,
+            "rows_out": 10.0,
+            "model_calls": 0.0,
+            "seconds": 0.0,
+            "provenance": "placeholder",
+            "remote_calls": 0.0,
+            "cache_hits": 0,
+            "degraded": 0
+          }
+        ]
+      }
+    },
+    {
+      "pass_name": "P5 retrieval narrowing",
+      "note": "SIM becomes embed + rerank over opinion text, top 200. Two-stage retrieval before any LLM touches anything.",
+      "plan": {
+        "node_id": "n6",
+        "label": "Project(2)",
+        "grain": [
+          "cluster"
+        ],
+        "children": [
+          {
+            "node_id": "n5",
+            "label": "Limit(10)",
+            "grain": [
+              "cluster"
+            ],
+            "children": [
+              {
+                "node_id": "n3c",
+                "label": "Collapse(cluster)",
+                "grain": [
+                  "cluster"
+                ],
+                "children": [
+                  {
+                    "node_id": "n3",
+                    "label": "AUDIO",
+                    "grain": [
+                      "cluster",
+                      "segments"
+                    ],
+                    "children": [
+                      {
+                        "node_id": "n3e",
+                        "label": "Expand(audio.segments)",
+                        "grain": [
+                          "cluster",
+                          "segments"
+                        ],
+                        "children": [
+                          {
+                            "node_id": "n3m",
+                            "label": "Materialize(asr)",
+                            "grain": [
+                              "cluster"
+                            ],
+                            "children": [
+                              {
+                                "node_id": "n4c",
+                                "label": "Collapse(cluster)",
+                                "grain": [
+                                  "cluster"
+                                ],
+                                "children": [
+                                  {
+                                    "node_id": "n4",
+                                    "label": "VISUAL",
+                                    "grain": [
+                                      "cluster",
+                                      "scan_pages"
+                                    ],
+                                    "children": [
+                                      {
+                                        "node_id": "n4e",
+                                        "label": "Expand(cluster.scan_pages)",
+                                        "grain": [
+                                          "cluster",
+                                          "scan_pages"
+                                        ],
+                                        "children": [
+                                          {
+                                            "node_id": "n4m",
+                                            "label": "Materialize(rasterize)",
+                                            "grain": [
+                                              "cluster"
+                                            ],
+                                            "children": [
+                                              {
+                                                "node_id": "n2",
+                                                "label": "SEM",
+                                                "grain": [
+                                                  "cluster"
+                                                ],
+                                                "children": [
+                                                  {
+                                                    "node_id": "n1",
+                                                    "label": "Retrieve(top 200)",
+                                                    "grain": [
+                                                      "cluster"
+                                                    ],
+                                                    "children": [
+                                                      {
+                                                        "node_id": "n0",
+                                                        "label": "Scan(cluster, docket, opinion, citation)",
+                                                        "grain": [
+                                                          "cluster"
+                                                        ],
+                                                        "children": [],
+                                                        "node": "scan",
+                                                        "tables": [
+                                                          "cluster",
+                                                          "docket",
+                                                          "opinion",
+                                                          "citation"
+                                                        ],
+                                                        "sql": "SELECT c.id, c.case_name, c.scan_pdf_url, d.id AS docket_id\n  FROM cluster c\n  JOIN docket d ON c.docket_id = d.id\n  JOIN opinion o ON o.cluster_id = c.id\n  JOIN citation ct ON ct.citing_opinion_id = o.id\n WHERE d.court_id = ? AND c.date_filed >= ? AND ct.cited_cite = ?",
+                                                        "params": [
+                                                          "ca9",
+                                                          "2022-01-01",
+                                                          "490 U.S. 386"
+                                                        ],
+                                                        "pushed": [
+                                                          "docket.court_id = \"ca9\"",
+                                                          "cluster.date_filed >= \"2022-01-01\"",
+                                                          "citation.cited_cite = \"490 U.S. 386\""
+                                                        ],
+                                                        "selectivity": 0.0082,
+                                                        "selectivity_source": "probed"
+                                                      }
+                                                    ],
+                                                    "node": "retrieve",
+                                                    "field": {
+                                                      "source": "opinion",
+                                                      "path": [
+                                                        "plain_text"
+                                                      ]
+                                                    },
+                                                    "text": "qualified immunity excessive force standard",
+                                                    "top_k": 200,
+                                                    "embed_model": "UNVERIFIED-embed-local",
+                                                    "rerank_model": "UNVERIFIED-rerank-local"
+                                                  }
+                                                ],
+                                                "node": "semantic_filter",
+                                                "predicate_class": "sem",
+                                                "field": {
+                                                  "source": "opinion",
+                                                  "path": [
+                                                    "plain_text"
+                                                  ]
+                                                },
+                                                "text": "the opinion analyzes qualified immunity for excessive force",
+                                                "negated": false,
+                                                "bound_model": "UNVERIFIED-oracle-remote",
+                                                "binding_reason": "not yet bound \u2014 costed at the heaviest eligible model (the naive plan)",
+                                                "selectivity": 0.5,
+                                                "selectivity_source": "static",
+                                                "escalation_fraction": null,
+                                                "early_exit": false
+                                              }
+                                            ],
+                                            "node": "materialize",
+                                            "source": {
+                                              "source": "cluster",
+                                              "path": [
+                                                "scan_pdf_url"
+                                              ]
+                                            },
+                                            "produces": {
+                                              "source": "cluster",
+                                              "path": [
+                                                "scan_pages"
+                                              ]
+                                            },
+                                            "method": "rasterize",
+                                            "bound_model": "bespoke:pdf-raster",
+                                            "binding_reason": "deterministic, no model"
+                                          }
+                                        ],
+                                        "node": "expand",
+                                        "field": {
+                                          "source": "cluster",
+                                          "path": [
+                                            "scan_pages"
+                                          ]
+                                        },
+                                        "fanout": 47.0,
+                                        "fanout_provenance": "placeholder"
+                                      }
+                                    ],
+                                    "node": "semantic_filter",
+                                    "predicate_class": "visual",
+                                    "field": {
+                                      "source": "cluster",
+                                      "path": [
+                                        "scan_pages"
+                                      ]
+                                    },
+                                    "text": "the page contains a photographic exhibit",
+                                    "negated": false,
+                                    "bound_model": "UNVERIFIED-oracle-remote",
+                                    "binding_reason": "not yet bound \u2014 costed at the heaviest eligible model (the naive plan)",
+                                    "selectivity": 0.5,
+                                    "selectivity_source": "static",
+                                    "escalation_fraction": null,
+                                    "early_exit": false
+                                  }
+                                ],
+                                "node": "collapse"
+                              }
+                            ],
+                            "node": "materialize",
+                            "source": {
+                              "source": "docket",
+                              "path": [
+                                "argument_audio"
+                              ]
+                            },
+                            "produces": {
+                              "source": "audio",
+                              "path": [
+                                "segments"
+                              ]
+                            },
+                            "method": "asr",
+                            "bound_model": "UNVERIFIED-asr-local",
+                            "binding_reason": "transcription dominates the audio predicate"
+                          }
+                        ],
+                        "node": "expand",
+                        "field": {
+                          "source": "audio",
+                          "path": [
+                            "segments"
+                          ]
+                        },
+                        "fanout": 320.0,
+                        "fanout_provenance": "placeholder"
+                      }
+                    ],
+                    "node": "semantic_filter",
+                    "predicate_class": "audio",
+                    "field": {
+                      "source": "audio",
+                      "path": [
+                        "segments"
+                      ]
+                    },
+                    "text": "a judge expressed skepticism",
+                    "negated": false,
+                    "bound_model": "UNVERIFIED-oracle-remote",
+                    "binding_reason": "not yet bound \u2014 costed at the heaviest eligible model (the naive plan)",
+                    "selectivity": 0.5,
+                    "selectivity_source": "static",
+                    "escalation_fraction": null,
+                    "early_exit": false
+                  }
+                ],
+                "node": "collapse"
+              }
+            ],
+            "node": "limit",
+            "k": 10,
+            "early_exit": false
+          }
+        ],
+        "node": "project",
+        "columns": [
+          {
+            "label": "cluster_id",
+            "ref": {
+              "source": "cluster",
+              "path": [
+                "id"
+              ]
+            },
+            "unnest": false,
+            "agg": null
+          },
+          {
+            "label": "case_name",
+            "ref": {
+              "source": "cluster",
+              "path": [
+                "case_name"
+              ]
+            },
+            "unnest": false,
+            "agg": null
+          }
+        ]
+      },
+      "estimate": {
+        "provenance": "placeholder",
+        "seconds": 14326.163235555507,
+        "model_calls": 5964.259999999982,
+        "remote_calls": 5693.1999999999825,
+        "rows_in": 32000.0,
+        "rows_out": 8.059999999999944,
+        "stages": [
+          {
+            "node_id": "n0",
+            "rows_in": 32000.0,
+            "rows_out": 262.40000000000003,
+            "model_calls": 0.0,
+            "seconds": 0.00384,
+            "provenance": "placeholder",
+            "remote_calls": 0.0,
+            "cache_hits": 0,
+            "degraded": 0
+          },
+          {
+            "node_id": "n1",
+            "rows_in": 262.40000000000003,
+            "rows_out": 200.0,
+            "model_calls": 201.0,
+            "seconds": 4.767460317460317,
+            "provenance": "placeholder",
+            "remote_calls": 0.0,
+            "cache_hits": 0,
+            "degraded": 0
+          },
+          {
+            "node_id": "n2",
+            "rows_in": 200.0,
+            "rows_out": 100.0,
+            "model_calls": 200.0,
+            "seconds": 476.1904761904762,
+            "provenance": "placeholder",
+            "remote_calls": 200.0,
+            "cache_hits": 0,
+            "degraded": 0
+          },
+          {
+            "node_id": "n4m",
+            "rows_in": 100.0,
+            "rows_out": 62.0,
+            "model_calls": 62.0,
+            "seconds": 1.922,
+            "provenance": "placeholder",
+            "remote_calls": 0.0,
+            "cache_hits": 0,
+            "degraded": 0
+          },
+          {
+            "node_id": "n4e",
+            "rows_in": 62.0,
+            "rows_out": 2914.0,
+            "model_calls": 0.0,
+            "seconds": 2.3312,
+            "provenance": "placeholder",
+            "remote_calls": 0.0,
+            "cache_hits": 0,
+            "degraded": 0
+          },
+          {
+            "node_id": "n4",
+            "rows_in": 2914.0,
+            "rows_out": 1457.0,
+            "model_calls": 2914.0,
+            "seconds": 6938.095238095238,
+            "provenance": "placeholder",
+            "remote_calls": 2914.0,
+            "cache_hits": 0,
+            "degraded": 0
+          },
+          {
+            "node_id": "n4c",
+            "rows_in": 1457.0,
+            "rows_out": 61.99999999999956,
+            "model_calls": 0.0,
+            "seconds": 1.1656,
+            "provenance": "placeholder",
+            "remote_calls": 0.0,
+            "cache_hits": 0,
+            "degraded": 0
+          },
+          {
+            "node_id": "n3m",
+            "rows_in": 61.99999999999956,
+            "rows_out": 8.059999999999944,
+            "model_calls": 8.059999999999944,
+            "seconds": 757.6399999999948,
+            "provenance": "placeholder",
+            "remote_calls": 0.0,
+            "cache_hits": 0,
+            "degraded": 0
+          },
+          {
+            "node_id": "n3e",
+            "rows_in": 8.059999999999944,
+            "rows_out": 2579.199999999982,
+            "model_calls": 0.0,
+            "seconds": 2.0633599999999857,
+            "provenance": "placeholder",
+            "remote_calls": 0.0,
+            "cache_hits": 0,
+            "degraded": 0
+          },
+          {
+            "node_id": "n3",
+            "rows_in": 2579.199999999982,
+            "rows_out": 1289.599999999991,
+            "model_calls": 2579.199999999982,
+            "seconds": 6140.952380952338,
+            "provenance": "placeholder",
+            "remote_calls": 2579.199999999982,
+            "cache_hits": 0,
+            "degraded": 0
+          },
+          {
+            "node_id": "n3c",
+            "rows_in": 1289.599999999991,
+            "rows_out": 8.059999999999944,
+            "model_calls": 0.0,
+            "seconds": 1.0316799999999928,
+            "provenance": "placeholder",
+            "remote_calls": 0.0,
+            "cache_hits": 0,
+            "degraded": 0
+          },
+          {
+            "node_id": "n5",
+            "rows_in": 8.059999999999944,
+            "rows_out": 8.059999999999944,
+            "model_calls": 0.0,
+            "seconds": 0.0,
+            "provenance": "placeholder",
+            "remote_calls": 0.0,
+            "cache_hits": 0,
+            "degraded": 0
+          },
+          {
+            "node_id": "n6",
+            "rows_in": 8.059999999999944,
+            "rows_out": 8.059999999999944,
+            "model_calls": 0.0,
+            "seconds": 0.0,
+            "provenance": "placeholder",
+            "remote_calls": 0.0,
+            "cache_hits": 0,
+            "degraded": 0
+          }
+        ]
+      }
+    },
+    {
+      "pass_name": "P6 selectivity",
+      "note": "Static priors from calibration.json replace the 0.5 placeholders. VISUAL is the sharpest filter at 0.021 and also the costliest per case.",
+      "plan": {
+        "node_id": "n6",
+        "label": "Project(2)",
+        "grain": [
+          "cluster"
+        ],
+        "children": [
+          {
+            "node_id": "n5",
+            "label": "Limit(10)",
+            "grain": [
+              "cluster"
+            ],
+            "children": [
+              {
+                "node_id": "n3c",
+                "label": "Collapse(cluster)",
+                "grain": [
+                  "cluster"
+                ],
+                "children": [
+                  {
+                    "node_id": "n3",
+                    "label": "AUDIO",
+                    "grain": [
+                      "cluster",
+                      "segments"
+                    ],
+                    "children": [
+                      {
+                        "node_id": "n3e",
+                        "label": "Expand(audio.segments)",
+                        "grain": [
+                          "cluster",
+                          "segments"
+                        ],
+                        "children": [
+                          {
+                            "node_id": "n3m",
+                            "label": "Materialize(asr)",
+                            "grain": [
+                              "cluster"
+                            ],
+                            "children": [
+                              {
+                                "node_id": "n4c",
+                                "label": "Collapse(cluster)",
+                                "grain": [
+                                  "cluster"
+                                ],
+                                "children": [
+                                  {
+                                    "node_id": "n4",
+                                    "label": "VISUAL",
+                                    "grain": [
+                                      "cluster",
+                                      "scan_pages"
+                                    ],
+                                    "children": [
+                                      {
+                                        "node_id": "n4e",
+                                        "label": "Expand(cluster.scan_pages)",
+                                        "grain": [
+                                          "cluster",
+                                          "scan_pages"
+                                        ],
+                                        "children": [
+                                          {
+                                            "node_id": "n4m",
+                                            "label": "Materialize(rasterize)",
+                                            "grain": [
+                                              "cluster"
+                                            ],
+                                            "children": [
+                                              {
+                                                "node_id": "n2",
+                                                "label": "SEM",
+                                                "grain": [
+                                                  "cluster"
+                                                ],
+                                                "children": [
+                                                  {
+                                                    "node_id": "n1",
+                                                    "label": "Retrieve(top 200)",
+                                                    "grain": [
+                                                      "cluster"
+                                                    ],
+                                                    "children": [
+                                                      {
+                                                        "node_id": "n0",
+                                                        "label": "Scan(cluster, docket, opinion, citation)",
+                                                        "grain": [
+                                                          "cluster"
+                                                        ],
+                                                        "children": [],
+                                                        "node": "scan",
+                                                        "tables": [
+                                                          "cluster",
+                                                          "docket",
+                                                          "opinion",
+                                                          "citation"
+                                                        ],
+                                                        "sql": "SELECT c.id, c.case_name, c.scan_pdf_url, d.id AS docket_id\n  FROM cluster c\n  JOIN docket d ON c.docket_id = d.id\n  JOIN opinion o ON o.cluster_id = c.id\n  JOIN citation ct ON ct.citing_opinion_id = o.id\n WHERE d.court_id = ? AND c.date_filed >= ? AND ct.cited_cite = ?",
+                                                        "params": [
+                                                          "ca9",
+                                                          "2022-01-01",
+                                                          "490 U.S. 386"
+                                                        ],
+                                                        "pushed": [
+                                                          "docket.court_id = \"ca9\"",
+                                                          "cluster.date_filed >= \"2022-01-01\"",
+                                                          "citation.cited_cite = \"490 U.S. 386\""
+                                                        ],
+                                                        "selectivity": 0.0082,
+                                                        "selectivity_source": "probed"
+                                                      }
+                                                    ],
+                                                    "node": "retrieve",
+                                                    "field": {
+                                                      "source": "opinion",
+                                                      "path": [
+                                                        "plain_text"
+                                                      ]
+                                                    },
+                                                    "text": "qualified immunity excessive force standard",
+                                                    "top_k": 200,
+                                                    "embed_model": "UNVERIFIED-embed-local",
+                                                    "rerank_model": "UNVERIFIED-rerank-local"
+                                                  }
+                                                ],
+                                                "node": "semantic_filter",
+                                                "predicate_class": "sem",
+                                                "field": {
+                                                  "source": "opinion",
+                                                  "path": [
+                                                    "plain_text"
+                                                  ]
+                                                },
+                                                "text": "the opinion analyzes qualified immunity for excessive force",
+                                                "negated": false,
+                                                "bound_model": "UNVERIFIED-oracle-remote",
+                                                "binding_reason": "not yet bound \u2014 costed at the heaviest eligible model (the naive plan)",
+                                                "selectivity": 0.34,
+                                                "selectivity_source": "static",
+                                                "escalation_fraction": null,
+                                                "early_exit": false
+                                              }
+                                            ],
+                                            "node": "materialize",
+                                            "source": {
+                                              "source": "cluster",
+                                              "path": [
+                                                "scan_pdf_url"
+                                              ]
+                                            },
+                                            "produces": {
+                                              "source": "cluster",
+                                              "path": [
+                                                "scan_pages"
+                                              ]
+                                            },
+                                            "method": "rasterize",
+                                            "bound_model": "bespoke:pdf-raster",
+                                            "binding_reason": "deterministic, no model"
+                                          }
+                                        ],
+                                        "node": "expand",
+                                        "field": {
+                                          "source": "cluster",
+                                          "path": [
+                                            "scan_pages"
+                                          ]
+                                        },
+                                        "fanout": 47.0,
+                                        "fanout_provenance": "placeholder"
+                                      }
+                                    ],
+                                    "node": "semantic_filter",
+                                    "predicate_class": "visual",
+                                    "field": {
+                                      "source": "cluster",
+                                      "path": [
+                                        "scan_pages"
+                                      ]
+                                    },
+                                    "text": "the page contains a photographic exhibit",
+                                    "negated": false,
+                                    "bound_model": "UNVERIFIED-oracle-remote",
+                                    "binding_reason": "not yet bound \u2014 costed at the heaviest eligible model (the naive plan)",
+                                    "selectivity": 0.021,
+                                    "selectivity_source": "static",
+                                    "escalation_fraction": null,
+                                    "early_exit": false
+                                  }
+                                ],
+                                "node": "collapse"
+                              }
+                            ],
+                            "node": "materialize",
+                            "source": {
+                              "source": "docket",
+                              "path": [
+                                "argument_audio"
+                              ]
+                            },
+                            "produces": {
+                              "source": "audio",
+                              "path": [
+                                "segments"
+                              ]
+                            },
+                            "method": "asr",
+                            "bound_model": "UNVERIFIED-asr-local",
+                            "binding_reason": "transcription dominates the audio predicate"
+                          }
+                        ],
+                        "node": "expand",
+                        "field": {
+                          "source": "audio",
+                          "path": [
+                            "segments"
+                          ]
+                        },
+                        "fanout": 320.0,
+                        "fanout_provenance": "placeholder"
+                      }
+                    ],
+                    "node": "semantic_filter",
+                    "predicate_class": "audio",
+                    "field": {
+                      "source": "audio",
+                      "path": [
+                        "segments"
+                      ]
+                    },
+                    "text": "a judge expressed skepticism",
+                    "negated": false,
+                    "bound_model": "UNVERIFIED-oracle-remote",
+                    "binding_reason": "not yet bound \u2014 costed at the heaviest eligible model (the naive plan)",
+                    "selectivity": 0.06,
+                    "selectivity_source": "static",
+                    "escalation_fraction": null,
+                    "early_exit": false
+                  }
+                ],
+                "node": "collapse"
+              }
+            ],
+            "node": "limit",
+            "k": 10,
+            "early_exit": false
+          }
+        ],
+        "node": "project",
+        "columns": [
+          {
+            "label": "cluster_id",
+            "ref": {
+              "source": "cluster",
+              "path": [
+                "id"
+              ]
+            },
+            "unnest": false,
+            "agg": null
+          },
+          {
+            "label": "case_name",
+            "ref": {
+              "source": "cluster",
+              "path": [
+                "case_name"
+              ]
+            },
+            "unnest": false,
+            "agg": null
+          }
+        ]
+      },
+      "estimate": {
+        "provenance": "placeholder",
+        "seconds": 8163.734519976591,
+        "model_calls": 3535.1799582676,
+        "remote_calls": 3288.560456839975,
+        "rows_in": 32000.0,
+        "rows_out": 3.459501418916757,
+        "stages": [
+          {
+            "node_id": "n0",
+            "rows_in": 32000.0,
+            "rows_out": 262.40000000000003,
+            "model_calls": 0.0,
+            "seconds": 0.00384,
+            "provenance": "placeholder",
+            "remote_calls": 0.0,
+            "cache_hits": 0,
+            "degraded": 0
+          },
+          {
+            "node_id": "n1",
+            "rows_in": 262.40000000000003,
+            "rows_out": 200.0,
+            "model_calls": 201.0,
+            "seconds": 4.767460317460317,
+            "provenance": "placeholder",
+            "remote_calls": 0.0,
+            "cache_hits": 0,
+            "degraded": 0
+          },
+          {
+            "node_id": "n2",
+            "rows_in": 200.0,
+            "rows_out": 68.0,
+            "model_calls": 200.0,
+            "seconds": 476.1904761904762,
+            "provenance": "placeholder",
+            "remote_calls": 200.0,
+            "cache_hits": 0,
+            "degraded": 0
+          },
+          {
+            "node_id": "n4m",
+            "rows_in": 68.0,
+            "rows_out": 42.16,
+            "model_calls": 42.16,
+            "seconds": 1.30696,
+            "provenance": "placeholder",
+            "remote_calls": 0.0,
+            "cache_hits": 0,
+            "degraded": 0
+          },
+          {
+            "node_id": "n4e",
+            "rows_in": 42.16,
+            "rows_out": 1981.5199999999998,
+            "model_calls": 0.0,
+            "seconds": 1.585216,
+            "provenance": "placeholder",
+            "remote_calls": 0.0,
+            "cache_hits": 0,
+            "degraded": 0
+          },
+          {
+            "node_id": "n4",
+            "rows_in": 1981.5199999999998,
+            "rows_out": 41.61192,
+            "model_calls": 1981.5199999999998,
+            "seconds": 4717.9047619047615,
+            "provenance": "placeholder",
+            "remote_calls": 1981.5199999999998,
+            "cache_hits": 0,
+            "degraded": 0
+          },
+          {
+            "node_id": "n4c",
+            "rows_in": 41.61192,
+            "rows_out": 26.611549443268633,
+            "model_calls": 0.0,
+            "seconds": 0.033289536,
+            "provenance": "placeholder",
+            "remote_calls": 0.0,
+            "cache_hits": 0,
+            "degraded": 0
+          },
+          {
+            "node_id": "n3m",
+            "rows_in": 26.611549443268633,
+            "rows_out": 3.4595014276249225,
+            "model_calls": 3.4595014276249225,
+            "seconds": 325.19313419674273,
+            "provenance": "placeholder",
+            "remote_calls": 0.0,
+            "cache_hits": 0,
+            "degraded": 0
+          },
+          {
+            "node_id": "n3e",
+            "rows_in": 3.4595014276249225,
+            "rows_out": 1107.0404568399751,
+            "model_calls": 0.0,
+            "seconds": 0.8856323654719802,
+            "provenance": "placeholder",
+            "remote_calls": 0.0,
+            "cache_hits": 0,
+            "degraded": 0
+          },
+          {
+            "node_id": "n3",
+            "rows_in": 1107.0404568399751,
+            "rows_out": 66.42242741039851,
+            "model_calls": 1107.0404568399751,
+            "seconds": 2635.81061152375,
+            "provenance": "placeholder",
+            "remote_calls": 1107.0404568399751,
+            "cache_hits": 0,
+            "degraded": 0
+          },
+          {
+            "node_id": "n3c",
+            "rows_in": 66.42242741039851,
+            "rows_out": 3.459501418916757,
+            "model_calls": 0.0,
+            "seconds": 0.05313794192831881,
+            "provenance": "placeholder",
+            "remote_calls": 0.0,
+            "cache_hits": 0,
+            "degraded": 0
+          },
+          {
+            "node_id": "n5",
+            "rows_in": 3.459501418916757,
+            "rows_out": 3.459501418916757,
+            "model_calls": 0.0,
+            "seconds": 0.0,
+            "provenance": "placeholder",
+            "remote_calls": 0.0,
+            "cache_hits": 0,
+            "degraded": 0
+          },
+          {
+            "node_id": "n6",
+            "rows_in": 3.459501418916757,
+            "rows_out": 3.459501418916757,
+            "model_calls": 0.0,
+            "seconds": 0.0,
+            "provenance": "placeholder",
+            "remote_calls": 0.0,
+            "cache_hits": 0,
+            "degraded": 0
+          }
+        ]
+      }
+    },
+    {
+      "pass_name": "P7 cost ordering",
+      "note": "Order by cost/(1-s) ascending, and AUDIO overtakes VISUAL. Transcription is the most expensive operation in the system, but only ~13% of dockets have a recording, so ASR is also an 87% filter that costs nothing on what it eliminates: ~19s per surviving case against ~35s for 47 pages of VLM. Ranking needs a price and a price needs a model, so each node is provisionally bound to its cheapest eligible one here \u2014 which is how the mutual dependence between ordering and binding is broken without searching the joint space.",
+      "plan": {
+        "node_id": "n6",
+        "label": "Project(2)",
+        "grain": [
+          "cluster"
+        ],
+        "children": [
+          {
+            "node_id": "n5",
+            "label": "Limit(10)",
+            "grain": [
+              "cluster"
+            ],
+            "children": [
+              {
+                "node_id": "n4c",
+                "label": "Collapse(cluster)",
+                "grain": [
+                  "cluster"
+                ],
+                "children": [
+                  {
+                    "node_id": "n4",
+                    "label": "VISUAL",
+                    "grain": [
+                      "cluster",
+                      "scan_pages"
+                    ],
+                    "children": [
+                      {
+                        "node_id": "n4e",
+                        "label": "Expand(cluster.scan_pages)",
+                        "grain": [
+                          "cluster",
+                          "scan_pages"
+                        ],
+                        "children": [
+                          {
+                            "node_id": "n4m",
+                            "label": "Materialize(rasterize)",
+                            "grain": [
+                              "cluster"
+                            ],
+                            "children": [
+                              {
+                                "node_id": "n3c",
+                                "label": "Collapse(cluster)",
+                                "grain": [
+                                  "cluster"
+                                ],
+                                "children": [
+                                  {
+                                    "node_id": "n3",
+                                    "label": "AUDIO",
+                                    "grain": [
+                                      "cluster",
+                                      "segments"
+                                    ],
+                                    "children": [
+                                      {
+                                        "node_id": "n3e",
+                                        "label": "Expand(audio.segments)",
+                                        "grain": [
+                                          "cluster",
+                                          "segments"
+                                        ],
+                                        "children": [
+                                          {
+                                            "node_id": "n3m",
+                                            "label": "Materialize(asr)",
+                                            "grain": [
+                                              "cluster"
+                                            ],
+                                            "children": [
+                                              {
+                                                "node_id": "n2",
+                                                "label": "SEM",
+                                                "grain": [
+                                                  "cluster"
+                                                ],
+                                                "children": [
+                                                  {
+                                                    "node_id": "n1",
+                                                    "label": "Retrieve(top 200)",
+                                                    "grain": [
+                                                      "cluster"
+                                                    ],
+                                                    "children": [
+                                                      {
+                                                        "node_id": "n0",
+                                                        "label": "Scan(cluster, docket, opinion, citation)",
+                                                        "grain": [
+                                                          "cluster"
+                                                        ],
+                                                        "children": [],
+                                                        "node": "scan",
+                                                        "tables": [
+                                                          "cluster",
+                                                          "docket",
+                                                          "opinion",
+                                                          "citation"
+                                                        ],
+                                                        "sql": "SELECT c.id, c.case_name, c.scan_pdf_url, d.id AS docket_id\n  FROM cluster c\n  JOIN docket d ON c.docket_id = d.id\n  JOIN opinion o ON o.cluster_id = c.id\n  JOIN citation ct ON ct.citing_opinion_id = o.id\n WHERE d.court_id = ? AND c.date_filed >= ? AND ct.cited_cite = ?",
+                                                        "params": [
+                                                          "ca9",
+                                                          "2022-01-01",
+                                                          "490 U.S. 386"
+                                                        ],
+                                                        "pushed": [
+                                                          "docket.court_id = \"ca9\"",
+                                                          "cluster.date_filed >= \"2022-01-01\"",
+                                                          "citation.cited_cite = \"490 U.S. 386\""
+                                                        ],
+                                                        "selectivity": 0.0082,
+                                                        "selectivity_source": "probed"
+                                                      }
+                                                    ],
+                                                    "node": "retrieve",
+                                                    "field": {
+                                                      "source": "opinion",
+                                                      "path": [
+                                                        "plain_text"
+                                                      ]
+                                                    },
+                                                    "text": "qualified immunity excessive force standard",
+                                                    "top_k": 200,
+                                                    "embed_model": "UNVERIFIED-embed-local",
+                                                    "rerank_model": "UNVERIFIED-rerank-local"
+                                                  }
+                                                ],
+                                                "node": "semantic_filter",
+                                                "predicate_class": "sem",
+                                                "field": {
+                                                  "source": "opinion",
+                                                  "path": [
+                                                    "plain_text"
+                                                  ]
+                                                },
+                                                "text": "the opinion analyzes qualified immunity for excessive force",
+                                                "negated": false,
+                                                "bound_model": "UNVERIFIED-sem-lightning-local",
+                                                "binding_reason": "cheapest SEM model clearing accuracy floor 0.85",
+                                                "selectivity": 0.34,
+                                                "selectivity_source": "static",
+                                                "escalation_fraction": null,
+                                                "early_exit": false
+                                              }
+                                            ],
+                                            "node": "materialize",
+                                            "source": {
+                                              "source": "docket",
+                                              "path": [
+                                                "argument_audio"
+                                              ]
+                                            },
+                                            "produces": {
+                                              "source": "audio",
+                                              "path": [
+                                                "segments"
+                                              ]
+                                            },
+                                            "method": "asr",
+                                            "bound_model": "UNVERIFIED-asr-local",
+                                            "binding_reason": "transcription dominates the audio predicate"
+                                          }
+                                        ],
+                                        "node": "expand",
+                                        "field": {
+                                          "source": "audio",
+                                          "path": [
+                                            "segments"
+                                          ]
+                                        },
+                                        "fanout": 320.0,
+                                        "fanout_provenance": "placeholder"
+                                      }
+                                    ],
+                                    "node": "semantic_filter",
+                                    "predicate_class": "audio",
+                                    "field": {
+                                      "source": "audio",
+                                      "path": [
+                                        "segments"
+                                      ]
+                                    },
+                                    "text": "a judge expressed skepticism",
+                                    "negated": false,
+                                    "bound_model": "UNVERIFIED-sem-lightning-local",
+                                    "binding_reason": "a transcript is text once ASR has run, so the bulk text model serves it",
+                                    "selectivity": 0.06,
+                                    "selectivity_source": "static",
+                                    "escalation_fraction": null,
+                                    "early_exit": false
+                                  }
+                                ],
+                                "node": "collapse"
+                              }
+                            ],
+                            "node": "materialize",
+                            "source": {
+                              "source": "cluster",
+                              "path": [
+                                "scan_pdf_url"
+                              ]
+                            },
+                            "produces": {
+                              "source": "cluster",
+                              "path": [
+                                "scan_pages"
+                              ]
+                            },
+                            "method": "rasterize",
+                            "bound_model": "bespoke:pdf-raster",
+                            "binding_reason": "deterministic, no model"
+                          }
+                        ],
+                        "node": "expand",
+                        "field": {
+                          "source": "cluster",
+                          "path": [
+                            "scan_pages"
+                          ]
+                        },
+                        "fanout": 47.0,
+                        "fanout_provenance": "placeholder"
+                      }
+                    ],
+                    "node": "semantic_filter",
+                    "predicate_class": "visual",
+                    "field": {
+                      "source": "cluster",
+                      "path": [
+                        "scan_pages"
+                      ]
+                    },
+                    "text": "the page contains a photographic exhibit",
+                    "negated": false,
+                    "bound_model": "UNVERIFIED-vlm-nano-local",
+                    "binding_reason": "pictorial predicate over a scan -> general VLM, not DOC_PARSE",
+                    "selectivity": 0.021,
+                    "selectivity_source": "static",
+                    "escalation_fraction": null,
+                    "early_exit": false
+                  }
+                ],
+                "node": "collapse"
+              }
+            ],
+            "node": "limit",
+            "k": 10,
+            "early_exit": false
+          }
+        ],
+        "node": "project",
+        "columns": [
+          {
+            "label": "cluster_id",
+            "ref": {
+              "source": "cluster",
+              "path": [
+                "id"
+              ]
+            },
+            "unnest": false,
+            "agg": null
+          },
+          {
+            "label": "case_name",
+            "ref": {
+              "source": "cluster",
+              "path": [
+                "case_name"
+              ]
+            },
+            "unnest": false,
+            "agg": null
+          }
+        ]
+      },
+      "estimate": {
+        "provenance": "placeholder",
+        "seconds": 1551.5303663446348,
+        "model_calls": 3501.718399337786,
+        "remote_calls": 0.0,
+        "rows_in": 32000.0,
+        "rows_out": 3.4595014189167577,
+        "stages": [
+          {
+            "node_id": "n0",
+            "rows_in": 32000.0,
+            "rows_out": 262.40000000000003,
+            "model_calls": 0.0,
+            "seconds": 0.00384,
+            "provenance": "placeholder",
+            "remote_calls": 0.0,
+            "cache_hits": 0,
+            "degraded": 0
+          },
+          {
+            "node_id": "n1",
+            "rows_in": 262.40000000000003,
+            "rows_out": 200.0,
+            "model_calls": 201.0,
+            "seconds": 4.767460317460317,
+            "provenance": "placeholder",
+            "remote_calls": 0.0,
+            "cache_hits": 0,
+            "degraded": 0
+          },
+          {
+            "node_id": "n2",
+            "rows_in": 200.0,
+            "rows_out": 68.0,
+            "model_calls": 200.0,
+            "seconds": 34.48275862068966,
+            "provenance": "placeholder",
+            "remote_calls": 0.0,
+            "cache_hits": 0,
+            "degraded": 0
+          },
+          {
+            "node_id": "n3m",
+            "rows_in": 68.0,
+            "rows_out": 8.84,
+            "model_calls": 8.84,
+            "seconds": 830.96,
+            "provenance": "placeholder",
+            "remote_calls": 0.0,
+            "cache_hits": 0,
+            "degraded": 0
+          },
+          {
+            "node_id": "n3e",
+            "rows_in": 8.84,
+            "rows_out": 2828.8,
+            "model_calls": 0.0,
+            "seconds": 2.26304,
+            "provenance": "placeholder",
+            "remote_calls": 0.0,
+            "cache_hits": 0,
+            "degraded": 0
+          },
+          {
+            "node_id": "n3",
+            "rows_in": 2828.8,
+            "rows_out": 169.728,
+            "model_calls": 2828.8,
+            "seconds": 487.72413793103453,
+            "provenance": "placeholder",
+            "remote_calls": 0.0,
+            "cache_hits": 0,
+            "degraded": 0
+          },
+          {
+            "node_id": "n3c",
+            "rows_in": 169.728,
+            "rows_out": 8.839999977748187,
+            "model_calls": 0.0,
+            "seconds": 0.13578240000000003,
+            "provenance": "placeholder",
+            "remote_calls": 0.0,
+            "cache_hits": 0,
+            "degraded": 0
+          },
+          {
+            "node_id": "n4m",
+            "rows_in": 8.839999977748187,
+            "rows_out": 5.480799986203876,
+            "model_calls": 5.480799986203876,
+            "seconds": 0.16990479957232016,
+            "provenance": "placeholder",
+            "remote_calls": 0.0,
+            "cache_hits": 0,
+            "degraded": 0
+          },
+          {
+            "node_id": "n4e",
+            "rows_in": 5.480799986203876,
+            "rows_out": 257.5975993515822,
+            "model_calls": 0.0,
+            "seconds": 0.20607807948126575,
+            "provenance": "placeholder",
+            "remote_calls": 0.0,
+            "cache_hits": 0,
+            "degraded": 0
+          },
+          {
+            "node_id": "n4",
+            "rows_in": 257.5975993515822,
+            "rows_out": 5.409549586383226,
+            "model_calls": 257.5975993515822,
+            "seconds": 190.81303655672752,
+            "provenance": "placeholder",
+            "remote_calls": 0.0,
+            "cache_hits": 0,
+            "degraded": 0
+          },
+          {
+            "node_id": "n4c",
+            "rows_in": 5.409549586383226,
+            "rows_out": 3.4595014189167577,
+            "model_calls": 0.0,
+            "seconds": 0.00432763966910658,
+            "provenance": "placeholder",
+            "remote_calls": 0.0,
+            "cache_hits": 0,
+            "degraded": 0
+          },
+          {
+            "node_id": "n5",
+            "rows_in": 3.4595014189167577,
+            "rows_out": 3.4595014189167577,
+            "model_calls": 0.0,
+            "seconds": 0.0,
+            "provenance": "placeholder",
+            "remote_calls": 0.0,
+            "cache_hits": 0,
+            "degraded": 0
+          },
+          {
+            "node_id": "n6",
+            "rows_in": 3.4595014189167577,
+            "rows_out": 3.4595014189167577,
+            "model_calls": 0.0,
+            "seconds": 0.0,
+            "provenance": "placeholder",
+            "remote_calls": 0.0,
+            "cache_hits": 0,
+            "degraded": 0
+          }
+        ]
+      }
+    },
+    {
+      "pass_name": "P8 model binding",
+      "note": "The upgrade pass revisits P7 provisional bindings against the 0.85 accuracy floor. Nothing changes here: every cheapest-eligible model already clears the floor, and no node gains enough accuracy from the next model up to justify it. A pass that correctly does nothing is still a pass that ran.",
+      "plan": {
+        "node_id": "n6",
+        "label": "Project(2)",
+        "grain": [
+          "cluster"
+        ],
+        "children": [
+          {
+            "node_id": "n5",
+            "label": "Limit(10)",
+            "grain": [
+              "cluster"
+            ],
+            "children": [
+              {
+                "node_id": "n4c",
+                "label": "Collapse(cluster)",
+                "grain": [
+                  "cluster"
+                ],
+                "children": [
+                  {
+                    "node_id": "n4",
+                    "label": "VISUAL",
+                    "grain": [
+                      "cluster",
+                      "scan_pages"
+                    ],
+                    "children": [
+                      {
+                        "node_id": "n4e",
+                        "label": "Expand(cluster.scan_pages)",
+                        "grain": [
+                          "cluster",
+                          "scan_pages"
+                        ],
+                        "children": [
+                          {
+                            "node_id": "n4m",
+                            "label": "Materialize(rasterize)",
+                            "grain": [
+                              "cluster"
+                            ],
+                            "children": [
+                              {
+                                "node_id": "n3c",
+                                "label": "Collapse(cluster)",
+                                "grain": [
+                                  "cluster"
+                                ],
+                                "children": [
+                                  {
+                                    "node_id": "n3",
+                                    "label": "AUDIO",
+                                    "grain": [
+                                      "cluster",
+                                      "segments"
+                                    ],
+                                    "children": [
+                                      {
+                                        "node_id": "n3e",
+                                        "label": "Expand(audio.segments)",
+                                        "grain": [
+                                          "cluster",
+                                          "segments"
+                                        ],
+                                        "children": [
+                                          {
+                                            "node_id": "n3m",
+                                            "label": "Materialize(asr)",
+                                            "grain": [
+                                              "cluster"
+                                            ],
+                                            "children": [
+                                              {
+                                                "node_id": "n2",
+                                                "label": "SEM",
+                                                "grain": [
+                                                  "cluster"
+                                                ],
+                                                "children": [
+                                                  {
+                                                    "node_id": "n1",
+                                                    "label": "Retrieve(top 200)",
+                                                    "grain": [
+                                                      "cluster"
+                                                    ],
+                                                    "children": [
+                                                      {
+                                                        "node_id": "n0",
+                                                        "label": "Scan(cluster, docket, opinion, citation)",
+                                                        "grain": [
+                                                          "cluster"
+                                                        ],
+                                                        "children": [],
+                                                        "node": "scan",
+                                                        "tables": [
+                                                          "cluster",
+                                                          "docket",
+                                                          "opinion",
+                                                          "citation"
+                                                        ],
+                                                        "sql": "SELECT c.id, c.case_name, c.scan_pdf_url, d.id AS docket_id\n  FROM cluster c\n  JOIN docket d ON c.docket_id = d.id\n  JOIN opinion o ON o.cluster_id = c.id\n  JOIN citation ct ON ct.citing_opinion_id = o.id\n WHERE d.court_id = ? AND c.date_filed >= ? AND ct.cited_cite = ?",
+                                                        "params": [
+                                                          "ca9",
+                                                          "2022-01-01",
+                                                          "490 U.S. 386"
+                                                        ],
+                                                        "pushed": [
+                                                          "docket.court_id = \"ca9\"",
+                                                          "cluster.date_filed >= \"2022-01-01\"",
+                                                          "citation.cited_cite = \"490 U.S. 386\""
+                                                        ],
+                                                        "selectivity": 0.0082,
+                                                        "selectivity_source": "probed"
+                                                      }
+                                                    ],
+                                                    "node": "retrieve",
+                                                    "field": {
+                                                      "source": "opinion",
+                                                      "path": [
+                                                        "plain_text"
+                                                      ]
+                                                    },
+                                                    "text": "qualified immunity excessive force standard",
+                                                    "top_k": 200,
+                                                    "embed_model": "UNVERIFIED-embed-local",
+                                                    "rerank_model": "UNVERIFIED-rerank-local"
+                                                  }
+                                                ],
+                                                "node": "semantic_filter",
+                                                "predicate_class": "sem",
+                                                "field": {
+                                                  "source": "opinion",
+                                                  "path": [
+                                                    "plain_text"
+                                                  ]
+                                                },
+                                                "text": "the opinion analyzes qualified immunity for excessive force",
+                                                "negated": false,
+                                                "bound_model": "UNVERIFIED-sem-lightning-local",
+                                                "binding_reason": "cheapest SEM model clearing accuracy floor 0.85",
+                                                "selectivity": 0.34,
+                                                "selectivity_source": "static",
+                                                "escalation_fraction": null,
+                                                "early_exit": false
+                                              }
+                                            ],
+                                            "node": "materialize",
+                                            "source": {
+                                              "source": "docket",
+                                              "path": [
+                                                "argument_audio"
+                                              ]
+                                            },
+                                            "produces": {
+                                              "source": "audio",
+                                              "path": [
+                                                "segments"
+                                              ]
+                                            },
+                                            "method": "asr",
+                                            "bound_model": "UNVERIFIED-asr-local",
+                                            "binding_reason": "transcription dominates the audio predicate"
+                                          }
+                                        ],
+                                        "node": "expand",
+                                        "field": {
+                                          "source": "audio",
+                                          "path": [
+                                            "segments"
+                                          ]
+                                        },
+                                        "fanout": 320.0,
+                                        "fanout_provenance": "placeholder"
+                                      }
+                                    ],
+                                    "node": "semantic_filter",
+                                    "predicate_class": "audio",
+                                    "field": {
+                                      "source": "audio",
+                                      "path": [
+                                        "segments"
+                                      ]
+                                    },
+                                    "text": "a judge expressed skepticism",
+                                    "negated": false,
+                                    "bound_model": "UNVERIFIED-sem-lightning-local",
+                                    "binding_reason": "a transcript is text once ASR has run, so the bulk text model serves it",
+                                    "selectivity": 0.06,
+                                    "selectivity_source": "static",
+                                    "escalation_fraction": null,
+                                    "early_exit": false
+                                  }
+                                ],
+                                "node": "collapse"
+                              }
+                            ],
+                            "node": "materialize",
+                            "source": {
+                              "source": "cluster",
+                              "path": [
+                                "scan_pdf_url"
+                              ]
+                            },
+                            "produces": {
+                              "source": "cluster",
+                              "path": [
+                                "scan_pages"
+                              ]
+                            },
+                            "method": "rasterize",
+                            "bound_model": "bespoke:pdf-raster",
+                            "binding_reason": "deterministic, no model"
+                          }
+                        ],
+                        "node": "expand",
+                        "field": {
+                          "source": "cluster",
+                          "path": [
+                            "scan_pages"
+                          ]
+                        },
+                        "fanout": 47.0,
+                        "fanout_provenance": "placeholder"
+                      }
+                    ],
+                    "node": "semantic_filter",
+                    "predicate_class": "visual",
+                    "field": {
+                      "source": "cluster",
+                      "path": [
+                        "scan_pages"
+                      ]
+                    },
+                    "text": "the page contains a photographic exhibit",
+                    "negated": false,
+                    "bound_model": "UNVERIFIED-vlm-nano-local",
+                    "binding_reason": "pictorial predicate over a scan -> general VLM, not DOC_PARSE",
+                    "selectivity": 0.021,
+                    "selectivity_source": "static",
+                    "escalation_fraction": null,
+                    "early_exit": false
+                  }
+                ],
+                "node": "collapse"
+              }
+            ],
+            "node": "limit",
+            "k": 10,
+            "early_exit": false
+          }
+        ],
+        "node": "project",
+        "columns": [
+          {
+            "label": "cluster_id",
+            "ref": {
+              "source": "cluster",
+              "path": [
+                "id"
+              ]
+            },
+            "unnest": false,
+            "agg": null
+          },
+          {
+            "label": "case_name",
+            "ref": {
+              "source": "cluster",
+              "path": [
+                "case_name"
+              ]
+            },
+            "unnest": false,
+            "agg": null
+          }
+        ]
+      },
+      "estimate": {
+        "provenance": "placeholder",
+        "seconds": 1551.5303663446348,
+        "model_calls": 3501.718399337786,
+        "remote_calls": 0.0,
+        "rows_in": 32000.0,
+        "rows_out": 3.4595014189167577,
+        "stages": [
+          {
+            "node_id": "n0",
+            "rows_in": 32000.0,
+            "rows_out": 262.40000000000003,
+            "model_calls": 0.0,
+            "seconds": 0.00384,
+            "provenance": "placeholder",
+            "remote_calls": 0.0,
+            "cache_hits": 0,
+            "degraded": 0
+          },
+          {
+            "node_id": "n1",
+            "rows_in": 262.40000000000003,
+            "rows_out": 200.0,
+            "model_calls": 201.0,
+            "seconds": 4.767460317460317,
+            "provenance": "placeholder",
+            "remote_calls": 0.0,
+            "cache_hits": 0,
+            "degraded": 0
+          },
+          {
+            "node_id": "n2",
+            "rows_in": 200.0,
+            "rows_out": 68.0,
+            "model_calls": 200.0,
+            "seconds": 34.48275862068966,
+            "provenance": "placeholder",
+            "remote_calls": 0.0,
+            "cache_hits": 0,
+            "degraded": 0
+          },
+          {
+            "node_id": "n3m",
+            "rows_in": 68.0,
+            "rows_out": 8.84,
+            "model_calls": 8.84,
+            "seconds": 830.96,
+            "provenance": "placeholder",
+            "remote_calls": 0.0,
+            "cache_hits": 0,
+            "degraded": 0
+          },
+          {
+            "node_id": "n3e",
+            "rows_in": 8.84,
+            "rows_out": 2828.8,
+            "model_calls": 0.0,
+            "seconds": 2.26304,
+            "provenance": "placeholder",
+            "remote_calls": 0.0,
+            "cache_hits": 0,
+            "degraded": 0
+          },
+          {
+            "node_id": "n3",
+            "rows_in": 2828.8,
+            "rows_out": 169.728,
+            "model_calls": 2828.8,
+            "seconds": 487.72413793103453,
+            "provenance": "placeholder",
+            "remote_calls": 0.0,
+            "cache_hits": 0,
+            "degraded": 0
+          },
+          {
+            "node_id": "n3c",
+            "rows_in": 169.728,
+            "rows_out": 8.839999977748187,
+            "model_calls": 0.0,
+            "seconds": 0.13578240000000003,
+            "provenance": "placeholder",
+            "remote_calls": 0.0,
+            "cache_hits": 0,
+            "degraded": 0
+          },
+          {
+            "node_id": "n4m",
+            "rows_in": 8.839999977748187,
+            "rows_out": 5.480799986203876,
+            "model_calls": 5.480799986203876,
+            "seconds": 0.16990479957232016,
+            "provenance": "placeholder",
+            "remote_calls": 0.0,
+            "cache_hits": 0,
+            "degraded": 0
+          },
+          {
+            "node_id": "n4e",
+            "rows_in": 5.480799986203876,
+            "rows_out": 257.5975993515822,
+            "model_calls": 0.0,
+            "seconds": 0.20607807948126575,
+            "provenance": "placeholder",
+            "remote_calls": 0.0,
+            "cache_hits": 0,
+            "degraded": 0
+          },
+          {
+            "node_id": "n4",
+            "rows_in": 257.5975993515822,
+            "rows_out": 5.409549586383226,
+            "model_calls": 257.5975993515822,
+            "seconds": 190.81303655672752,
+            "provenance": "placeholder",
+            "remote_calls": 0.0,
+            "cache_hits": 0,
+            "degraded": 0
+          },
+          {
+            "node_id": "n4c",
+            "rows_in": 5.409549586383226,
+            "rows_out": 3.4595014189167577,
+            "model_calls": 0.0,
+            "seconds": 0.00432763966910658,
+            "provenance": "placeholder",
+            "remote_calls": 0.0,
+            "cache_hits": 0,
+            "degraded": 0
+          },
+          {
+            "node_id": "n5",
+            "rows_in": 3.4595014189167577,
+            "rows_out": 3.4595014189167577,
+            "model_calls": 0.0,
+            "seconds": 0.0,
+            "provenance": "placeholder",
+            "remote_calls": 0.0,
+            "cache_hits": 0,
+            "degraded": 0
+          },
+          {
+            "node_id": "n6",
+            "rows_in": 3.4595014189167577,
+            "rows_out": 3.4595014189167577,
+            "model_calls": 0.0,
+            "seconds": 0.0,
+            "provenance": "placeholder",
+            "remote_calls": 0.0,
+            "cache_hits": 0,
+            "degraded": 0
+          }
+        ]
+      }
+    },
+    {
+      "pass_name": "P9 cascade",
+      "note": "Escalation attached at 0.10 \u2014 the bottom tenth by confidence rank goes to the remote oracle. Visible and editable, not executor magic.",
+      "plan": {
+        "node_id": "n6",
+        "label": "Project(2)",
+        "grain": [
+          "cluster"
+        ],
+        "children": [
+          {
+            "node_id": "n5",
+            "label": "Limit(10)",
+            "grain": [
+              "cluster"
+            ],
+            "children": [
+              {
+                "node_id": "n4c",
+                "label": "Collapse(cluster)",
+                "grain": [
+                  "cluster"
+                ],
+                "children": [
+                  {
+                    "node_id": "n4",
+                    "label": "VISUAL",
+                    "grain": [
+                      "cluster",
+                      "scan_pages"
+                    ],
+                    "children": [
+                      {
+                        "node_id": "n4e",
+                        "label": "Expand(cluster.scan_pages)",
+                        "grain": [
+                          "cluster",
+                          "scan_pages"
+                        ],
+                        "children": [
+                          {
+                            "node_id": "n4m",
+                            "label": "Materialize(rasterize)",
+                            "grain": [
+                              "cluster"
+                            ],
+                            "children": [
+                              {
+                                "node_id": "n3c",
+                                "label": "Collapse(cluster)",
+                                "grain": [
+                                  "cluster"
+                                ],
+                                "children": [
+                                  {
+                                    "node_id": "n3",
+                                    "label": "AUDIO",
+                                    "grain": [
+                                      "cluster",
+                                      "segments"
+                                    ],
+                                    "children": [
+                                      {
+                                        "node_id": "n3e",
+                                        "label": "Expand(audio.segments)",
+                                        "grain": [
+                                          "cluster",
+                                          "segments"
+                                        ],
+                                        "children": [
+                                          {
+                                            "node_id": "n3m",
+                                            "label": "Materialize(asr)",
+                                            "grain": [
+                                              "cluster"
+                                            ],
+                                            "children": [
+                                              {
+                                                "node_id": "n2",
+                                                "label": "SEM",
+                                                "grain": [
+                                                  "cluster"
+                                                ],
+                                                "children": [
+                                                  {
+                                                    "node_id": "n1",
+                                                    "label": "Retrieve(top 200)",
+                                                    "grain": [
+                                                      "cluster"
+                                                    ],
+                                                    "children": [
+                                                      {
+                                                        "node_id": "n0",
+                                                        "label": "Scan(cluster, docket, opinion, citation)",
+                                                        "grain": [
+                                                          "cluster"
+                                                        ],
+                                                        "children": [],
+                                                        "node": "scan",
+                                                        "tables": [
+                                                          "cluster",
+                                                          "docket",
+                                                          "opinion",
+                                                          "citation"
+                                                        ],
+                                                        "sql": "SELECT c.id, c.case_name, c.scan_pdf_url, d.id AS docket_id\n  FROM cluster c\n  JOIN docket d ON c.docket_id = d.id\n  JOIN opinion o ON o.cluster_id = c.id\n  JOIN citation ct ON ct.citing_opinion_id = o.id\n WHERE d.court_id = ? AND c.date_filed >= ? AND ct.cited_cite = ?",
+                                                        "params": [
+                                                          "ca9",
+                                                          "2022-01-01",
+                                                          "490 U.S. 386"
+                                                        ],
+                                                        "pushed": [
+                                                          "docket.court_id = \"ca9\"",
+                                                          "cluster.date_filed >= \"2022-01-01\"",
+                                                          "citation.cited_cite = \"490 U.S. 386\""
+                                                        ],
+                                                        "selectivity": 0.0082,
+                                                        "selectivity_source": "probed"
+                                                      }
+                                                    ],
+                                                    "node": "retrieve",
+                                                    "field": {
+                                                      "source": "opinion",
+                                                      "path": [
+                                                        "plain_text"
+                                                      ]
+                                                    },
+                                                    "text": "qualified immunity excessive force standard",
+                                                    "top_k": 200,
+                                                    "embed_model": "UNVERIFIED-embed-local",
+                                                    "rerank_model": "UNVERIFIED-rerank-local"
+                                                  }
+                                                ],
+                                                "node": "semantic_filter",
+                                                "predicate_class": "sem",
+                                                "field": {
+                                                  "source": "opinion",
+                                                  "path": [
+                                                    "plain_text"
+                                                  ]
+                                                },
+                                                "text": "the opinion analyzes qualified immunity for excessive force",
+                                                "negated": false,
+                                                "bound_model": "UNVERIFIED-sem-lightning-local",
+                                                "binding_reason": "cheapest SEM model clearing accuracy floor 0.85",
+                                                "selectivity": 0.34,
+                                                "selectivity_source": "static",
+                                                "escalation_fraction": 0.1,
+                                                "early_exit": false
+                                              }
+                                            ],
+                                            "node": "materialize",
+                                            "source": {
+                                              "source": "docket",
+                                              "path": [
+                                                "argument_audio"
+                                              ]
+                                            },
+                                            "produces": {
+                                              "source": "audio",
+                                              "path": [
+                                                "segments"
+                                              ]
+                                            },
+                                            "method": "asr",
+                                            "bound_model": "UNVERIFIED-asr-local",
+                                            "binding_reason": "transcription dominates the audio predicate"
+                                          }
+                                        ],
+                                        "node": "expand",
+                                        "field": {
+                                          "source": "audio",
+                                          "path": [
+                                            "segments"
+                                          ]
+                                        },
+                                        "fanout": 320.0,
+                                        "fanout_provenance": "placeholder"
+                                      }
+                                    ],
+                                    "node": "semantic_filter",
+                                    "predicate_class": "audio",
+                                    "field": {
+                                      "source": "audio",
+                                      "path": [
+                                        "segments"
+                                      ]
+                                    },
+                                    "text": "a judge expressed skepticism",
+                                    "negated": false,
+                                    "bound_model": "UNVERIFIED-sem-lightning-local",
+                                    "binding_reason": "a transcript is text once ASR has run, so the bulk text model serves it",
+                                    "selectivity": 0.06,
+                                    "selectivity_source": "static",
+                                    "escalation_fraction": 0.1,
+                                    "early_exit": false
+                                  }
+                                ],
+                                "node": "collapse"
+                              }
+                            ],
+                            "node": "materialize",
+                            "source": {
+                              "source": "cluster",
+                              "path": [
+                                "scan_pdf_url"
+                              ]
+                            },
+                            "produces": {
+                              "source": "cluster",
+                              "path": [
+                                "scan_pages"
+                              ]
+                            },
+                            "method": "rasterize",
+                            "bound_model": "bespoke:pdf-raster",
+                            "binding_reason": "deterministic, no model"
+                          }
+                        ],
+                        "node": "expand",
+                        "field": {
+                          "source": "cluster",
+                          "path": [
+                            "scan_pages"
+                          ]
+                        },
+                        "fanout": 47.0,
+                        "fanout_provenance": "placeholder"
+                      }
+                    ],
+                    "node": "semantic_filter",
+                    "predicate_class": "visual",
+                    "field": {
+                      "source": "cluster",
+                      "path": [
+                        "scan_pages"
+                      ]
+                    },
+                    "text": "the page contains a photographic exhibit",
+                    "negated": false,
+                    "bound_model": "UNVERIFIED-vlm-nano-local",
+                    "binding_reason": "pictorial predicate over a scan -> general VLM, not DOC_PARSE",
+                    "selectivity": 0.021,
+                    "selectivity_source": "static",
+                    "escalation_fraction": 0.1,
+                    "early_exit": false
+                  }
+                ],
+                "node": "collapse"
+              }
+            ],
+            "node": "limit",
+            "k": 10,
+            "early_exit": false
+          }
+        ],
+        "node": "project",
+        "columns": [
+          {
+            "label": "cluster_id",
+            "ref": {
+              "source": "cluster",
+              "path": [
+                "id"
+              ]
+            },
+            "unnest": false,
+            "agg": null
+          },
+          {
+            "label": "case_name",
+            "ref": {
+              "source": "cluster",
+              "path": [
+                "case_name"
+              ]
+            },
+            "unnest": false,
+            "agg": null
+          }
+        ]
+      },
+      "estimate": {
+        "provenance": "placeholder",
+        "seconds": 2334.0059852378686,
+        "model_calls": 3830.3581592729447,
+        "remote_calls": 328.6397599351583,
+        "rows_in": 32000.0,
+        "rows_out": 3.4595014189167577,
+        "stages": [
+          {
+            "node_id": "n0",
+            "rows_in": 32000.0,
+            "rows_out": 262.40000000000003,
+            "model_calls": 0.0,
+            "seconds": 0.00384,
+            "provenance": "placeholder",
+            "remote_calls": 0.0,
+            "cache_hits": 0,
+            "degraded": 0
+          },
+          {
+            "node_id": "n1",
+            "rows_in": 262.40000000000003,
+            "rows_out": 200.0,
+            "model_calls": 201.0,
+            "seconds": 4.767460317460317,
+            "provenance": "placeholder",
+            "remote_calls": 0.0,
+            "cache_hits": 0,
+            "degraded": 0
+          },
+          {
+            "node_id": "n2",
+            "rows_in": 200.0,
+            "rows_out": 68.0,
+            "model_calls": 220.0,
+            "seconds": 82.10180623973727,
+            "provenance": "placeholder",
+            "remote_calls": 20.0,
+            "cache_hits": 0,
+            "degraded": 0
+          },
+          {
+            "node_id": "n3m",
+            "rows_in": 68.0,
+            "rows_out": 8.84,
+            "model_calls": 8.84,
+            "seconds": 830.96,
+            "provenance": "placeholder",
+            "remote_calls": 0.0,
+            "cache_hits": 0,
+            "degraded": 0
+          },
+          {
+            "node_id": "n3e",
+            "rows_in": 8.84,
+            "rows_out": 2828.8,
+            "model_calls": 0.0,
+            "seconds": 2.26304,
+            "provenance": "placeholder",
+            "remote_calls": 0.0,
+            "cache_hits": 0,
+            "degraded": 0
+          },
+          {
+            "node_id": "n3",
+            "rows_in": 2828.8,
+            "rows_out": 169.728,
+            "model_calls": 3111.6800000000003,
+            "seconds": 1161.247947454844,
+            "provenance": "placeholder",
+            "remote_calls": 282.88000000000005,
+            "cache_hits": 0,
+            "degraded": 0
+          },
+          {
+            "node_id": "n3c",
+            "rows_in": 169.728,
+            "rows_out": 8.839999977748187,
+            "model_calls": 0.0,
+            "seconds": 0.13578240000000003,
+            "provenance": "placeholder",
+            "remote_calls": 0.0,
+            "cache_hits": 0,
+            "degraded": 0
+          },
+          {
+            "node_id": "n4m",
+            "rows_in": 8.839999977748187,
+            "rows_out": 5.480799986203876,
+            "model_calls": 5.480799986203876,
+            "seconds": 0.16990479957232016,
+            "provenance": "placeholder",
+            "remote_calls": 0.0,
+            "cache_hits": 0,
+            "degraded": 0
+          },
+          {
+            "node_id": "n4e",
+            "rows_in": 5.480799986203876,
+            "rows_out": 257.5975993515822,
+            "model_calls": 0.0,
+            "seconds": 0.20607807948126575,
+            "provenance": "placeholder",
+            "remote_calls": 0.0,
+            "cache_hits": 0,
+            "degraded": 0
+          },
+          {
+            "node_id": "n4",
+            "rows_in": 257.5975993515822,
+            "rows_out": 5.409549586383226,
+            "model_calls": 283.3573592867404,
+            "seconds": 252.14579830710423,
+            "provenance": "placeholder",
+            "remote_calls": 25.75975993515822,
+            "cache_hits": 0,
+            "degraded": 0
+          },
+          {
+            "node_id": "n4c",
+            "rows_in": 5.409549586383226,
+            "rows_out": 3.4595014189167577,
+            "model_calls": 0.0,
+            "seconds": 0.00432763966910658,
+            "provenance": "placeholder",
+            "remote_calls": 0.0,
+            "cache_hits": 0,
+            "degraded": 0
+          },
+          {
+            "node_id": "n5",
+            "rows_in": 3.4595014189167577,
+            "rows_out": 3.4595014189167577,
+            "model_calls": 0.0,
+            "seconds": 0.0,
+            "provenance": "placeholder",
+            "remote_calls": 0.0,
+            "cache_hits": 0,
+            "degraded": 0
+          },
+          {
+            "node_id": "n6",
+            "rows_in": 3.4595014189167577,
+            "rows_out": 3.4595014189167577,
+            "model_calls": 0.0,
+            "seconds": 0.0,
+            "provenance": "placeholder",
+            "remote_calls": 0.0,
+            "cache_hits": 0,
+            "degraded": 0
+          }
+        ]
+      }
+    },
+    {
+      "pass_name": "P10 early exit",
+      "note": "LIMIT 10 with no ORDER BY and no aggregate enables funnel early exit. The projection does not unnest, so page and segment elements are unobservable and per-group early exit is legal: ~31 of 47 pages examined rather than all 47.",
+      "plan": {
+        "node_id": "n6",
+        "label": "Project(2)",
+        "grain": [
+          "cluster"
+        ],
+        "children": [
+          {
+            "node_id": "n5",
+            "label": "Limit(10)",
+            "grain": [
+              "cluster"
+            ],
+            "children": [
+              {
+                "node_id": "n4c",
+                "label": "Collapse(cluster)",
+                "grain": [
+                  "cluster"
+                ],
+                "children": [
+                  {
+                    "node_id": "n4",
+                    "label": "VISUAL",
+                    "grain": [
+                      "cluster",
+                      "scan_pages"
+                    ],
+                    "children": [
+                      {
+                        "node_id": "n4e",
+                        "label": "Expand(cluster.scan_pages)",
+                        "grain": [
+                          "cluster",
+                          "scan_pages"
+                        ],
+                        "children": [
+                          {
+                            "node_id": "n4m",
+                            "label": "Materialize(rasterize)",
+                            "grain": [
+                              "cluster"
+                            ],
+                            "children": [
+                              {
+                                "node_id": "n3c",
+                                "label": "Collapse(cluster)",
+                                "grain": [
+                                  "cluster"
+                                ],
+                                "children": [
+                                  {
+                                    "node_id": "n3",
+                                    "label": "AUDIO",
+                                    "grain": [
+                                      "cluster",
+                                      "segments"
+                                    ],
+                                    "children": [
+                                      {
+                                        "node_id": "n3e",
+                                        "label": "Expand(audio.segments)",
+                                        "grain": [
+                                          "cluster",
+                                          "segments"
+                                        ],
+                                        "children": [
+                                          {
+                                            "node_id": "n3m",
+                                            "label": "Materialize(asr)",
+                                            "grain": [
+                                              "cluster"
+                                            ],
+                                            "children": [
+                                              {
+                                                "node_id": "n2",
+                                                "label": "SEM",
+                                                "grain": [
+                                                  "cluster"
+                                                ],
+                                                "children": [
+                                                  {
+                                                    "node_id": "n1",
+                                                    "label": "Retrieve(top 200)",
+                                                    "grain": [
+                                                      "cluster"
+                                                    ],
+                                                    "children": [
+                                                      {
+                                                        "node_id": "n0",
+                                                        "label": "Scan(cluster, docket, opinion, citation)",
+                                                        "grain": [
+                                                          "cluster"
+                                                        ],
+                                                        "children": [],
+                                                        "node": "scan",
+                                                        "tables": [
+                                                          "cluster",
+                                                          "docket",
+                                                          "opinion",
+                                                          "citation"
+                                                        ],
+                                                        "sql": "SELECT c.id, c.case_name, c.scan_pdf_url, d.id AS docket_id\n  FROM cluster c\n  JOIN docket d ON c.docket_id = d.id\n  JOIN opinion o ON o.cluster_id = c.id\n  JOIN citation ct ON ct.citing_opinion_id = o.id\n WHERE d.court_id = ? AND c.date_filed >= ? AND ct.cited_cite = ?",
+                                                        "params": [
+                                                          "ca9",
+                                                          "2022-01-01",
+                                                          "490 U.S. 386"
+                                                        ],
+                                                        "pushed": [
+                                                          "docket.court_id = \"ca9\"",
+                                                          "cluster.date_filed >= \"2022-01-01\"",
+                                                          "citation.cited_cite = \"490 U.S. 386\""
+                                                        ],
+                                                        "selectivity": 0.0082,
+                                                        "selectivity_source": "probed"
+                                                      }
+                                                    ],
+                                                    "node": "retrieve",
+                                                    "field": {
+                                                      "source": "opinion",
+                                                      "path": [
+                                                        "plain_text"
+                                                      ]
+                                                    },
+                                                    "text": "qualified immunity excessive force standard",
+                                                    "top_k": 200,
+                                                    "embed_model": "UNVERIFIED-embed-local",
+                                                    "rerank_model": "UNVERIFIED-rerank-local"
+                                                  }
+                                                ],
+                                                "node": "semantic_filter",
+                                                "predicate_class": "sem",
+                                                "field": {
+                                                  "source": "opinion",
+                                                  "path": [
+                                                    "plain_text"
+                                                  ]
+                                                },
+                                                "text": "the opinion analyzes qualified immunity for excessive force",
+                                                "negated": false,
+                                                "bound_model": "UNVERIFIED-sem-lightning-local",
+                                                "binding_reason": "cheapest SEM model clearing accuracy floor 0.85",
+                                                "selectivity": 0.34,
+                                                "selectivity_source": "static",
+                                                "escalation_fraction": 0.1,
+                                                "early_exit": false
+                                              }
+                                            ],
+                                            "node": "materialize",
+                                            "source": {
+                                              "source": "docket",
+                                              "path": [
+                                                "argument_audio"
+                                              ]
+                                            },
+                                            "produces": {
+                                              "source": "audio",
+                                              "path": [
+                                                "segments"
+                                              ]
+                                            },
+                                            "method": "asr",
+                                            "bound_model": "UNVERIFIED-asr-local",
+                                            "binding_reason": "transcription dominates the audio predicate"
+                                          }
+                                        ],
+                                        "node": "expand",
+                                        "field": {
+                                          "source": "audio",
+                                          "path": [
+                                            "segments"
+                                          ]
+                                        },
+                                        "fanout": 320.0,
+                                        "fanout_provenance": "placeholder"
+                                      }
+                                    ],
+                                    "node": "semantic_filter",
+                                    "predicate_class": "audio",
+                                    "field": {
+                                      "source": "audio",
+                                      "path": [
+                                        "segments"
+                                      ]
+                                    },
+                                    "text": "a judge expressed skepticism",
+                                    "negated": false,
+                                    "bound_model": "UNVERIFIED-sem-lightning-local",
+                                    "binding_reason": "a transcript is text once ASR has run, so the bulk text model serves it",
+                                    "selectivity": 0.06,
+                                    "selectivity_source": "static",
+                                    "escalation_fraction": 0.1,
+                                    "early_exit": true
+                                  }
+                                ],
+                                "node": "collapse"
+                              }
+                            ],
+                            "node": "materialize",
+                            "source": {
+                              "source": "cluster",
+                              "path": [
+                                "scan_pdf_url"
+                              ]
+                            },
+                            "produces": {
+                              "source": "cluster",
+                              "path": [
+                                "scan_pages"
+                              ]
+                            },
+                            "method": "rasterize",
+                            "bound_model": "bespoke:pdf-raster",
+                            "binding_reason": "deterministic, no model"
+                          }
+                        ],
+                        "node": "expand",
+                        "field": {
+                          "source": "cluster",
+                          "path": [
+                            "scan_pages"
+                          ]
+                        },
+                        "fanout": 47.0,
+                        "fanout_provenance": "placeholder"
+                      }
+                    ],
+                    "node": "semantic_filter",
+                    "predicate_class": "visual",
+                    "field": {
+                      "source": "cluster",
+                      "path": [
+                        "scan_pages"
+                      ]
+                    },
+                    "text": "the page contains a photographic exhibit",
+                    "negated": false,
+                    "bound_model": "UNVERIFIED-vlm-nano-local",
+                    "binding_reason": "pictorial predicate over a scan -> general VLM, not DOC_PARSE",
+                    "selectivity": 0.021,
+                    "selectivity_source": "static",
+                    "escalation_fraction": 0.1,
+                    "early_exit": true
+                  }
+                ],
+                "node": "collapse"
+              }
+            ],
+            "node": "limit",
+            "k": 10,
+            "early_exit": true
+          }
+        ],
+        "node": "project",
+        "columns": [
+          {
+            "label": "cluster_id",
+            "ref": {
+              "source": "cluster",
+              "path": [
+                "id"
+              ]
+            },
+            "unnest": false,
+            "agg": null
+          },
+          {
+            "label": "case_name",
+            "ref": {
+              "source": "cluster",
+              "path": [
+                "case_name"
+              ]
+            },
+            "unnest": false,
+            "agg": null
+          }
+        ]
+      },
+      "estimate": {
+        "provenance": "placeholder",
+        "seconds": 1142.3455440950383,
+        "model_calls": 778.5994453310365,
+        "remote_calls": 51.20714957680297,
+        "rows_in": 32000.0,
+        "rows_out": 3.4595014189167577,
+        "stages": [
+          {
+            "node_id": "n0",
+            "rows_in": 32000.0,
+            "rows_out": 262.40000000000003,
+            "model_calls": 0.0,
+            "seconds": 0.00384,
+            "provenance": "placeholder",
+            "remote_calls": 0.0,
+            "cache_hits": 0,
+            "degraded": 0
+          },
+          {
+            "node_id": "n1",
+            "rows_in": 262.40000000000003,
+            "rows_out": 200.0,
+            "model_calls": 201.0,
+            "seconds": 4.767460317460317,
+            "provenance": "placeholder",
+            "remote_calls": 0.0,
+            "cache_hits": 0,
+            "degraded": 0
+          },
+          {
+            "node_id": "n2",
+            "rows_in": 200.0,
+            "rows_out": 68.0,
+            "model_calls": 220.0,
+            "seconds": 82.10180623973727,
+            "provenance": "placeholder",
+            "remote_calls": 20.0,
+            "cache_hits": 0,
+            "degraded": 0
+          },
+          {
+            "node_id": "n3m",
+            "rows_in": 68.0,
+            "rows_out": 8.84,
+            "model_calls": 8.84,
+            "seconds": 830.96,
+            "provenance": "placeholder",
+            "remote_calls": 0.0,
+            "cache_hits": 0,
+            "degraded": 0
+          },
+          {
+            "node_id": "n3e",
+            "rows_in": 8.84,
+            "rows_out": 2828.8,
+            "model_calls": 0.0,
+            "seconds": 2.26304,
+            "provenance": "placeholder",
+            "remote_calls": 0.0,
+            "cache_hits": 0,
+            "degraded": 0
+          },
+          {
+            "node_id": "n3",
+            "rows_in": 2828.8,
+            "rows_out": 169.728,
+            "model_calls": 162.06666625871677,
+            "seconds": 60.481663777696966,
+            "provenance": "placeholder",
+            "remote_calls": 14.73333329624698,
+            "cache_hits": 0,
+            "degraded": 0
+          },
+          {
+            "node_id": "n3c",
+            "rows_in": 169.728,
+            "rows_out": 8.839999977748187,
+            "model_calls": 0.0,
+            "seconds": 0.13578240000000003,
+            "provenance": "placeholder",
+            "remote_calls": 0.0,
+            "cache_hits": 0,
+            "degraded": 0
+          },
+          {
+            "node_id": "n4m",
+            "rows_in": 8.839999977748187,
+            "rows_out": 5.480799986203876,
+            "model_calls": 5.480799986203876,
+            "seconds": 0.16990479957232016,
+            "provenance": "placeholder",
+            "remote_calls": 0.0,
+            "cache_hits": 0,
+            "degraded": 0
+          },
+          {
+            "node_id": "n4e",
+            "rows_in": 5.480799986203876,
+            "rows_out": 257.5975993515822,
+            "model_calls": 0.0,
+            "seconds": 0.20607807948126575,
+            "provenance": "placeholder",
+            "remote_calls": 0.0,
+            "cache_hits": 0,
+            "degraded": 0
+          },
+          {
+            "node_id": "n4",
+            "rows_in": 257.5975993515822,
+            "rows_out": 5.409549586383226,
+            "model_calls": 181.21197908611586,
+            "seconds": 161.25164084142105,
+            "provenance": "placeholder",
+            "remote_calls": 16.47381628055599,
+            "cache_hits": 0,
+            "degraded": 0
+          },
+          {
+            "node_id": "n4c",
+            "rows_in": 5.409549586383226,
+            "rows_out": 3.4595014189167577,
+            "model_calls": 0.0,
+            "seconds": 0.00432763966910658,
+            "provenance": "placeholder",
+            "remote_calls": 0.0,
+            "cache_hits": 0,
+            "degraded": 0
+          },
+          {
+            "node_id": "n5",
+            "rows_in": 3.4595014189167577,
+            "rows_out": 3.4595014189167577,
+            "model_calls": 0.0,
+            "seconds": 0.0,
+            "provenance": "placeholder",
+            "remote_calls": 0.0,
+            "cache_hits": 0,
+            "degraded": 0
+          },
+          {
+            "node_id": "n6",
+            "rows_in": 3.4595014189167577,
+            "rows_out": 3.4595014189167577,
+            "model_calls": 0.0,
+            "seconds": 0.0,
+            "provenance": "placeholder",
+            "remote_calls": 0.0,
+            "cache_hits": 0,
+            "degraded": 0
+          }
+        ]
+      }
+    }
+  ]
+}
