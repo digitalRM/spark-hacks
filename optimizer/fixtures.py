@@ -23,7 +23,7 @@ from query_language.bridge import example_courtlistener
 from query_language.type_system import Schema
 from optimizer.estimator import StaticEstimator, estimate
 from optimizer.lower import naive_binder
-from optimizer.optimize import Optimized, optimize
+from optimizer.optimizer import Optimized, optimize
 from optimizer.plan import PredicateClass, SemanticFilter, Limit, walk
 from optimizer.plan_editing import (
     node_json, node_of, render_funnel, render_plan, snapshot_json, validate,
@@ -76,7 +76,7 @@ def flagship_schema() -> Schema:
 
 def flagship(est: StaticEstimator | None = None) -> Optimized:
     est = est or StaticEstimator()
-    return optimize(flagship_query(), flagship_schema(), est,
+    return optimize(flagship_query(), flagship_schema(), est=est,
                     probe=lambda sql, params: PROBED_SCAN_ROWS,
                     base_rows=lambda table: est.base_rows(table)[0],
                     naive_bind=naive_binder(est))

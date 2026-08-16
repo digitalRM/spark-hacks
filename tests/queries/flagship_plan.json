@@ -3,7 +3,7 @@
   "snapshots": [
     {
       "pass_name": "lower",
-      "note": "AST to operator tree. Derived fields become Materialize, unnest becomes Expand/Collapse, FUZZY resolves by field type. Every predicate is its own operator in the order the query wrote it, and nothing is optimized \u2014 bound to the heaviest eligible model this is the naive baseline.",
+      "note": "AST to operator tree. Derived fields become Materialize, unnest becomes Expand/Collapse, and FUZZY resolves to SEM, VISUAL or AUDIO from the field type alone -- no model call, because the type system already decided it. Every predicate is its own operator in written order. Bound to the heaviest eligible model, this is the naive baseline.",
       "plan": {
         "node_id": "project14",
         "label": "Project(2)",
@@ -454,7 +454,7 @@
     },
     {
       "pass_name": "push down",
-      "note": "Every EXACT predicate and foreign-key join absorbed into one SQL statement, so the index evaluates them before anything expensive sees a row. Semantics-preserving: the same rows, less work.",
+      "note": "Every EXACT predicate and foreign-key join absorbed into a single SQL statement, so the index evaluates them before anything expensive sees a row. Semantics-preserving: the same rows for less work. With a prober attached the scan selectivity becomes a COUNT rather than a prior -- the one quantity in the cost model that can be measured instead of estimated.",
       "plan": {
         "node_id": "project14",
         "label": "Project(2)",
@@ -857,7 +857,7 @@
     },
     {
       "pass_name": "cost and order",
-      "note": "Estimate selectivity, bind each predicate to its cheapest model clearing the accuracy floor, then sort blocks by cost/(1-s) \u2014 cost per row eliminated. Ordering needs a price and a price needs a model, so binding happens here and is revisited once.",
+      "note": "Estimate selectivity, bind each predicate to the cheapest model clearing the accuracy floor, then sort blocks by cost/(1-s): cost per row eliminated. A set-valued predicate is four operators that move together, folded into one cost and one selectivity before the sort means anything. Ordering needs a price and a price needs a model, so binding happens here and is revisited once.",
       "plan": {
         "node_id": "project14",
         "label": "Project(2)",
@@ -1260,7 +1260,7 @@
     },
     {
       "pass_name": "finalize",
-      "note": "Early exit where nothing downstream can observe which element matched, and oracle escalation on the least-confident fraction of each local model's answers. Annotations only; nothing moves.",
+      "note": "Early exit wherever nothing downstream can observe which element matched -- a liveness argument, not an annotation -- and oracle escalation on the least confident fraction of each local model's answers. Nothing moves.",
       "plan": {
         "node_id": "project14",
         "label": "Project(2)",
