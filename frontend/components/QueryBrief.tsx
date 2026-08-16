@@ -165,19 +165,19 @@ export default function QueryBrief({ query }: { query: BqlQuery }) {
       </section>
 
       {/* criteria */}
-      <section className="flex flex-col gap-2">
+      <section className="flex flex-col gap-2 -mt-3">
         <SectionTitle>
           {items.length === 0
-            ? "No conditions — everything is returned"
+            ? "No conditions. Everything is returned"
             : op === "all"
               ? "Every result must meet all of these"
               : "Each result meets at least one of these"}
         </SectionTitle>
         {items.length > 0 && (
-          <ol className="divide-y divide-neutral-100 rounded-xl border border-neutral-200">
+          <ol className="divide-y divide-neutral-100 rounded-2xl border border-neutral-200">
             {items.map((c, i) => (
-              <li key={i} className="flex items-start gap-3 px-4 py-3">
-                <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-neutral-100 text-[11px] font-medium text-neutral-500">
+              <li key={i} className="flex items-start gap-3 px-3 py-3">
+                <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-neutral-100 text-[11px] font-medium text-neutral-500">
                   {i + 1}
                 </span>
                 <CriterionBody c={c} />
@@ -186,7 +186,7 @@ export default function QueryBrief({ query }: { query: BqlQuery }) {
           </ol>
         )}
         {items.length > 0 && (
-          <p className="px-1 text-xs leading-relaxed text-neutral-400">
+          <p className="px-1 text-xs leading-relaxed text-neutral-400 mt-2">
             <span className="font-medium text-neutral-500">Exact</span>{" "}
             conditions must match precisely.
             {hasFuzzy && (

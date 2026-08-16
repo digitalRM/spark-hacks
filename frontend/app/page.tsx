@@ -213,60 +213,60 @@ export default function Home() {
 
         {submitted && (
           <div data-bg-clear className="max-w-4xl mx-auto w-full">
-          <NotchedPanel
-            className="animate-rise-in"
-            title="Compiled Search"
-            actions={
-              <div
-                role="tablist"
-                className="flex max-w-full overflow-x-auto rounded-xl bg-neutral-100 p-1 text-sm"
-              >
-                {VIEWS.map((v) => (
-                  <button
-                    key={v.id}
-                    role="tab"
-                    aria-selected={view === v.id}
-                    onClick={() => setView(v.id)}
-                    className={
-                      "whitespace-nowrap rounded-lg px-3 py-1 transition-colors " +
-                      (view === v.id
-                        ? "bg-white font-medium"
-                        : "text-neutral-500 hover:text-neutral-900")
-                    }
-                  >
-                    {v.label}
-                  </button>
-                ))}
-              </div>
-            }
-          >
-            {/* panel mounts once; only the body cross-fades loading -> ready */}
-            {error ? (
-              <p className="rounded-xl border border-neutral-200 py-8 text-center text-sm text-rose-600 rounded-tr-lg">
-                {error}
-              </p>
-            ) : !ast ? (
-              <p className="rounded-xl border border-neutral-200 py-8 text-center text-sm text-neutral-400 -m-1.5 -mt-3">
-                Compiling your query…
-              </p>
-            ) : (
-              <div key="ready" className="animate-fade-in">
-                {view === "query" ? (
-                  <QueryBrief query={ast} />
-                ) : view === "json" ? (
-                  <pre className="overflow-x-auto rounded-xl bg-neutral-50 p-4 font-mono text-[13px] leading-relaxed text-neutral-800">
-                    {JSON.stringify(ast, null, 2)}
-                  </pre>
-                ) : view === "bql" ? (
-                  <pre className="overflow-x-auto whitespace-pre-wrap rounded-xl border border-neutral-200 bg-white p-4 font-mono text-[13px] leading-relaxed text-neutral-800">
-                    {bql}
-                  </pre>
-                ) : (
-                  <JsonTree data={ast as unknown as JsonValue} />
-                )}
-              </div>
-            )}
-          </NotchedPanel>
+            <NotchedPanel
+              className="animate-rise-in"
+              title="Compiled Search"
+              actions={
+                <div
+                  role="tablist"
+                  className="flex max-w-full overflow-x-auto rounded-xl bg-neutral-100 p-1 text-sm"
+                >
+                  {VIEWS.map((v) => (
+                    <button
+                      key={v.id}
+                      role="tab"
+                      aria-selected={view === v.id}
+                      onClick={() => setView(v.id)}
+                      className={
+                        "whitespace-nowrap rounded-lg px-3 py-1 transition-colors " +
+                        (view === v.id
+                          ? "bg-white font-medium"
+                          : "text-neutral-500 hover:text-neutral-900")
+                      }
+                    >
+                      {v.label}
+                    </button>
+                  ))}
+                </div>
+              }
+            >
+              {/* panel mounts once; only the body cross-fades loading -> ready */}
+              {error ? (
+                <p className="rounded-xl border border-neutral-200 py-8 text-center text-sm text-rose-600 rounded-tr-lg">
+                  {error}
+                </p>
+              ) : !ast ? (
+                <p className="rounded-xl border border-neutral-200 py-8 text-center text-sm text-neutral-400 -m-1.5 -mt-3">
+                  Compiling your query…
+                </p>
+              ) : (
+                <div key="ready" className="animate-fade-in">
+                  {view === "query" ? (
+                    <QueryBrief query={ast} />
+                  ) : view === "json" ? (
+                    <pre className="overflow-x-auto rounded-xl bg-neutral-50 p-4 font-mono text-[13px] leading-relaxed text-neutral-800">
+                      {JSON.stringify(ast, null, 2)}
+                    </pre>
+                  ) : view === "bql" ? (
+                    <pre className="overflow-x-auto whitespace-pre-wrap rounded-xl border border-neutral-200 bg-white p-4 font-mono text-[13px] leading-relaxed text-neutral-800">
+                      {bql}
+                    </pre>
+                  ) : (
+                    <JsonTree data={ast as unknown as JsonValue} />
+                  )}
+                </div>
+              )}
+            </NotchedPanel>
           </div>
         )}
 
