@@ -19,6 +19,11 @@ direct legal answer -- and nothing about the later stages. That is the contract 
 frontend depends on, and it must not start failing the day the executor lands and errors
 on a hard query.
 
+Dates are a type, not a convention: a date column is DATE in the registry and
+DateTimeType to the typechecker, compared against a `Date` literal (a bare ISO-8601
+string is accepted next to one). So `date_filed >= "2020-01-01"` typechecks, and it
+typechecks because both sides are dates rather than because text was made orderable.
+
 Cost: one routing call, then one compiler round trip on a cache miss, or one direct
 answer. Pure computation from there until the executor lands.
 """

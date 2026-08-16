@@ -231,31 +231,83 @@ def _scan(node: Scan, ctx: _Ctx) -> list[Row]:
     return rows
 
 
-# `date "2020-01-01"` is how the pretty-printer renders a Date literal, and the quoted
-# ISO-8601 text after it compares correctly as a string, so the tag is matched and dropped.
-_EXACT_RE = re.compile(
-    r'EXACT\((?P<lhs>[\w.]+)\s*(?P<op>=|>=|<=|>|<)\s*(?:date\s+)?"(?P<rhs>[^"]*)"\)')
+# ExactFilter carries two renderings of the same predicate: `predicate` is printed BQL for
+# the node card -- `doc.date_issued >= date "2020-01-01"` -- and `sql`/`params` is the
+# parameterised form pushdown splices into the Scan. This path evaluates the SQL form. It
+# is the one without quoting to undo: the value arrives already unwrapped in `params`, so
+# a Date literal, a string and a number all look the same here, and no display-only tag
+# (`date`, quotes) has to be parsed back off.
+_SQL_CMP = re.compile(r'^(?P<lhs>[\w.]+)\s*(?P<op>>=|<=|!=|=|>|<)\s*\?$')
+_SQL_BETWEEN = re.compile(r'^(?P<lhs>[\w.]+)\s+BETWEEN\s+\?\s+AND\s+\?$', re.I)
+_SQL_IN = re.compile(r'^(?P<lhs>[\w.]+)\s+IN\s*\([?,\s]+\)$', re.I)
+_SQL_LIKE = re.compile(r'^(?P<lhs>[\w.]+)\s+LIKE\s+\?$', re.I)
+
+
+def _compare(value: Any, param: Any) -> tuple[Any, Any]:
+    """One comparable pair, the way SQLite would read the column's affinity: a numeric
+    column numerically, everything else -- ISO dates included -- as text."""
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        try:
+            return value, type(value)(param)
+        except (TypeError, ValueError):
+            pass
+    return str(value), str(param)
+
+
+def _predicate(node: ExactFilter):
+    """A row test for this node's SQL fragment, or None when the shape is not handled."""
+    sql = (node.sql or '').strip()
+    params = list(node.params)
+
+    def field(lhs: str):
+        path = tuple(lhs.split('.')[1:])          # drop the source alias
+        def read(r: Row) -> Any:
+            v = _walk(r.doc, path)
+            return getattr(v, 'value', v)
+        return read
+
+    if (m := _SQL_CMP.match(sql)) and len(params) == 1:
+        read, op, (want,) = field(m['lhs']), m['op'], params
+        ops = {'=': lambda a, b: a == b, '!=': lambda a, b: a != b,
+               '>=': lambda a, b: a >= b, '<=': lambda a, b: a <= b,
+               '>': lambda a, b: a > b, '<': lambda a, b: a < b}
+        return lambda r: (v := read(r)) is not None and ops[op](*_compare(v, want))
+
+    if (m := _SQL_BETWEEN.match(sql)) and len(params) == 2:
+        read, (low, high) = field(m['lhs']), params
+        def between(r: Row) -> bool:
+            v = read(r)
+            if v is None: return False
+            lo_v, lo = _compare(v, low)
+            hi_v, hi = _compare(v, high)
+            return lo <= lo_v and hi_v <= hi
+        return between
+
+    if (m := _SQL_IN.match(sql)) and params:
+        read = field(m['lhs'])
+        def in_list(r: Row) -> bool:
+            v = read(r)
+            return v is not None and any(a == b for a, b in
+                                         (_compare(v, want) for want in params))
+        return in_list
+
+    if (m := _SQL_LIKE.match(sql)) and len(params) == 1:
+        read, pattern = field(m['lhs']), str(params[0])
+        regex = re.compile('^' + '.*'.join(re.escape(part) for part in pattern.split('%')) + '$',
+                           re.S)
+        return lambda r: (v := read(r)) is not None and bool(regex.match(str(v)))
+
+    return None
 
 
 def _exact_filter(node: ExactFilter, rows: list[Row], ctx: _Ctx) -> list[Row]:
     """Final plans push EXACT into the Scan, so this only fires on pre-pushdown plans.
-    Handles the common `field OP "literal"` shape; anything else passes through, flagged."""
-    m = _EXACT_RE.search(node.predicate)
+    An unhandled shape passes through, flagged degraded rather than silently dropped."""
+    keep = _predicate(node)
     degraded = 0
-    if m is None:
+    if keep is None:
         survivors, degraded = rows, len(rows)  # can't evaluate -> passthrough, but say so
     else:
-        path = tuple(m["lhs"].split(".")[1:])
-        op, rhs = m["op"], m["rhs"]
-
-        def keep(r: Row) -> bool:
-            v = _walk(r.doc, path)
-            v = getattr(v, "value", v)
-            if v is None:
-                return False
-            s = str(v)
-            return {"=": s == rhs, ">=": s >= rhs, "<=": s <= rhs, ">": s > rhs, "<": s < rhs}[op]
-
         survivors = [r for r in rows if keep(r)]
     ctx.record(_Stage(node.node_id, rows_in=len(rows), rows_out=len(survivors), degraded=degraded))
     return survivors

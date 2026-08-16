@@ -12,7 +12,6 @@ from .type_system import (
     FieldType, Schema,
 )
 
-ORDERED = (IntType, FloatType, TimestampType, DateTimeType)
 
 type Env = dict[str, FieldType]
 
@@ -52,13 +51,18 @@ def resolve_expression(e: Expression, env: Env) -> FieldType:
                 case t: raise TypeCheckError(f'Cannot unnest {t!r}')
         case Aggregator(AggregatorOp.COUNT, _): return IntType()
         case Aggregator(AggregatorOp.AVG, arg) if arg is not None:
-            if not isinstance(resolve_expression(arg, env), (IntType, FloatType)):
+            if not isinstance(scalar_base(resolve_expression(arg, env)), (IntType, FloatType)):
                 raise TypeCheckError('avg requires numeric type')
             return FloatType()
-        case Aggregator(op, arg) if arg is not None:
-            t = resolve_expression(arg, env)
+        case Aggregator(AggregatorOp.SUM, arg) if arg is not None:
+            t = scalar_base(resolve_expression(arg, env))
             if not isinstance(t, (IntType, FloatType)):
-                raise TypeCheckError(f'{op.value} requires numeric type, got {t!r}')
+                raise TypeCheckError(f'sum requires numeric type, got {t!r}')
+            return t
+        case Aggregator(op, arg) if arg is not None:            # min / max: anything orderable
+            t = scalar_base(resolve_expression(arg, env))
+            if not isinstance(t, ORDERABLE):
+                raise TypeCheckError(f'{op.value} requires an orderable type, got {t!r}')
             return t
         case Aggregator(op, None): raise TypeCheckError(f'{op.value} requires an argument')
         case Date():  return DateTimeType()
@@ -67,6 +71,22 @@ def resolve_expression(e: Expression, env: Env) -> FieldType:
         case float(): return FloatType()
         case str():   return TextType()
         case _: raise TypeCheckError(f'Unknown expression: {e!r}')
+
+# Ordering (<, <=, >, >=, between, min, max) needs a type that has an order. Text is not
+# on this list, and no longer needs to be: a date column is DATE in the registry and
+# DateTimeType here, so the one case that used to require lexicographic text ordering is
+# typed, and `case_name >= "Graham"` goes back to being the mistake it looks like.
+ORDERABLE = (IntType, FloatType, TimestampType, DateTimeType)
+# Scalars otherwise compare across kinds -- `envelope.id = 123`, `flag = true` -- with
+# SQLite's affinity semantics: the literal is coerced to the column. The registry cannot
+# say whether an id column is text or integer (both exist in one corpus), so a strict
+# type-equality rule would fail the most ordinary predicates on a guess. What is NOT
+# comparable: modal content (image/audio) and collections, except by membership below.
+SCALAR = (TextType, IntType, FloatType, BoolType, TimestampType, DateTimeType)
+
+def scalar_base(t: FieldType) -> FieldType:
+    """Strip Optional wrappers. Collections and modal types come back unchanged."""
+    return scalar_base(t.inner) if isinstance(t, OptionalType) else t
 
 def as_date(value: Expression, other: FieldType) -> bool:
     """Whether a bare ISO-8601 string standing next to a date should be read as one.
@@ -80,18 +100,31 @@ def as_date(value: Expression, other: FieldType) -> bool:
 
 def operand_types(left: Expression, right: Expression, env: Env) -> tuple[FieldType, FieldType]:
     """Both sides of a comparison, with a bare ISO string next to a date read as a date."""
-    lt, rt = resolve_expression(left, env), resolve_expression(right, env)
+    lt = scalar_base(resolve_expression(left, env))
+    rt = scalar_base(resolve_expression(right, env))
     if as_date(right, lt): rt = DateTimeType()
     if as_date(left, rt):  lt = DateTimeType()
     return lt, rt
 
 def check_comparable(op: ComparisonOperator, lt: FieldType, rt: FieldType) -> None:
-    if op not in (ComparisonOperator.EQ, ComparisonOperator.NE) and not isinstance(lt, ORDERED):
+    lt, rt = scalar_base(lt), scalar_base(rt)
+    # A set-valued scalar column against one scalar is membership: role_types = "judge",
+    # party_ids in [...]. Only equality makes sense there.
+    if isinstance(lt, (ArrayType, SequenceType)) and isinstance(rt, SCALAR):
+        if op not in (ComparisonOperator.EQ, ComparisonOperator.NE):
+            raise TypeCheckError(f'Operator {op.value} not supported on a set-valued field {lt!r}; use = or in')
+        lt = scalar_base(lt.element)
+    if not isinstance(lt, SCALAR) or not isinstance(rt, SCALAR):
+        raise TypeCheckError(f'Cannot compare {lt!r} with {rt!r}; comparisons take scalar fields and literals')
+    # A date is the one scalar that does NOT take affinity. `date_issued >= 2008` is not a
+    # loose way of saying 2008-01-01: SQLite sorts every number before every string, so the
+    # predicate is silently true for every row. A wrong date is worse than a refused one.
+    if isinstance(lt, DateTimeType) != isinstance(rt, DateTimeType):
+        raise TypeCheckError(
+            f'Cannot compare {lt!r} with {rt!r}: a date column takes a Date literal or an '
+            f'ISO-8601 string ("YYYY-MM-DD")')
+    if op not in (ComparisonOperator.EQ, ComparisonOperator.NE) and not isinstance(lt, ORDERABLE):
         raise TypeCheckError(f'Operator {op.value} not supported for {lt!r}')
-    if type(lt) != type(rt) and not (
-        isinstance(lt, (IntType, FloatType)) and isinstance(rt, (IntType, FloatType))
-    ):
-        raise TypeCheckError(f'Type mismatch: {lt!r} vs {rt!r}')
 
 def check_condition(c: Condition, env: Env) -> None:
     match c:
@@ -101,30 +134,46 @@ def check_condition(c: Condition, env: Env) -> None:
             ft = resolve_field_ref(field.source, field.path, env)
             for v in vals: check_comparable(ComparisonOperator.EQ, *operand_types(field, v, env))
         case Between(field, low, high):
-            ft = resolve_field_ref(field.source, field.path, env)
-            if not isinstance(ft, ORDERED):
-                raise TypeCheckError(f'between requires an ordered field '
-                                     f'(numeric, timestamp or date), got {ft!r}')
+            ft = scalar_base(resolve_field_ref(field.source, field.path, env))
+            if not isinstance(ft, ORDERABLE):
+                raise TypeCheckError(f'between requires an orderable field, got {ft!r}')
             for bound in (low, high):
                 check_comparable(ComparisonOperator.LE, *operand_types(field, bound, env))
         case Like(field, _):
-            if not isinstance(resolve_field_ref(field.source, field.path, env), TextType):
-                raise TypeCheckError('like requires text field')
+            ft = scalar_base(resolve_field_ref(field.source, field.path, env))
+            if isinstance(ft, (ArrayType, SequenceType)): ft = scalar_base(ft.element)   # any member matches
+            if not isinstance(ft, TextType):
+                raise TypeCheckError(f'like requires a text field, got {ft!r}')
         case And(children) | Or(children):
             for ch in children: check_condition(ch, env)
         case Not(child): check_condition(child, env)
         case _: raise TypeCheckError(f'Unknown condition: {c!r}')
 
-def resolve_source(s: Source, schema: Schema) -> Env:
+def source_env(s: Source, schema: Schema) -> Env:
+    """Every alias in the FROM clause, with its table type."""
     match s:
         case TableRef(name, alias):
             if name not in schema: raise TypeCheckError(f'Unknown table {name!r}')
             return {alias: schema[name]}
-        case Join(condition, left, right):
-            env = resolve_source(left, schema) | resolve_source(right, schema)
-            check_condition(condition, env)
-            return env
+        case Join(_, left, right):
+            return source_env(left, schema) | source_env(right, schema)
         case _: raise TypeCheckError(f'Unknown source: {s!r}')
+
+def check_joins(s: Source, env: Env) -> None:
+    """Join conditions resolve against the whole FROM clause, not just the subtree they
+    hang off. Inner joins are one conjunction; the nesting is the model's parenthesisation,
+    and `checks.validate` and `optimizer.lower` both already read it that way (lowering
+    renders the tree flat). A condition on `doc_high` written one level below where
+    `doc_high` is joined is a legal query with an odd tree, not a scope error."""
+    if isinstance(s, Join):
+        check_condition(s.condition, env)
+        check_joins(s.left, env)
+        check_joins(s.right, env)
+
+def resolve_source(s: Source, schema: Schema) -> Env:
+    env = source_env(s, schema)
+    check_joins(s, env)
+    return env
 
 def typecheck(q: Query, schema: Schema) -> Env:
     """Validate q against schema. Returns the Env for downstream type lookups via resolve_expression."""

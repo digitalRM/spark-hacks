@@ -91,6 +91,45 @@ class TestCanonicalAst(unittest.TestCase):
         )
         self.assertTrue(typecheck(query, example_schema))
 
+    def test_typechecker_accepts_ordinary_scalar_predicates(self):
+        """Ordinary predicates must not be type errors: ordering and min/max on dates,
+        numeric literals against text columns, and membership on set-valued scalars.
+
+        Scalars compare across kinds because the registry cannot say whether an id column
+        is text or integer. Dates are the exception -- see the rejected list below."""
+        from query_language.bridge import registry_to_schema
+        from query_language.schema import load
+        S = registry_to_schema(load("dataform"))
+        doc, per, proc = t("document", "doc"), t("person", "p"), t("proceeding", "proc")
+        ok = [
+            Query((f("doc", "title"),), doc, Comparison(Op.GE, f("doc", "date_issued"), "2008-01-01"), (), 10),
+            Query((f("doc", "title"),), doc,
+                  Comparison(Op.GE, f("doc", "date_issued"), Date("2008-01-01")), (), 10),
+            Query((f("doc", "title"),), doc, Comparison(Op.EQ, f("doc", "envelope", "id"), 123), (), 10),
+            Query((f("doc", "title"),), doc, Between(f("doc", "date_issued"), "2008-01-01", "2010-12-31"), (), 10),
+            Query((f("p", "name_last"),), per, Comparison(Op.EQ, f("p", "role_types"), "judge"), (), 10),
+            Query((f("p", "name_last"),), per, InList(f("p", "role_types"), ("judge", "attorney")), (), 10),
+            Query((f("p", "name_last"),), per, Like(f("p", "role_types"), "%judge%"), (), 10),
+            Query((f("proc", "organization_id"), Aggregator(AggregatorOp.MAX, f("proc", "date_filed"))),
+                  proc, None, (f("proc", "organization_id"),), None),
+        ]
+        for query in ok:
+            with self.subTest(where=query.where or query.select[-1]):
+                self.assertTrue(typecheck(query, S))
+        # Still rejected: ordering on a set, comparing modal content, summing text, and a
+        # year against a date. `date_issued >= 2008` is not a loose way of writing
+        # 2008-01-01 -- SQLite sorts every number before every string, so that predicate is
+        # silently true for every row. A date is the one scalar that does not take affinity.
+        for bad in [
+            Query((f("p", "name_last"),), per, Comparison(Op.GT, f("p", "role_types"), "judge"), (), 10),
+            Query((f("doc", "title"),), doc, Comparison(Op.EQ, f("doc", "media", "images"), "x"), (), 10),
+            Query((Aggregator(AggregatorOp.SUM, f("doc", "title")),), doc, None, (), None),
+            Query((f("doc", "title"),), doc, Comparison(Op.GE, f("doc", "date_issued"), 2008), (), 10),
+        ]:
+            with self.subTest(bad=bad.where or bad.select[0]):
+                with self.assertRaises(TypeCheckError):
+                    typecheck(bad, S)
+
     def test_round_trip_every_node(self):
         source = Join(
             eq(f("c", "docket_id"), f("d", "id")),
@@ -225,6 +264,71 @@ def _literals(node):
             case InList(_, values): yield from values
 
 
+class TestExactFilterExecution(unittest.TestCase):
+    """The plan's exact predicates have to actually filter.
+
+    ExactFilter carries two renderings: `predicate` is printed BQL for the node card,
+    `sql`/`params` is the parameterised form. The executor read the first one, with a
+    regex written for a third format (`EXACT(...)`, which is the node *label*), so every
+    exact predicate silently passed every row -- dates, court ids, everything -- and only
+    the `degraded` counter said so.
+    """
+
+    def setUp(self):
+        from optimizer.optimizer import optimize, to_json
+        from query_language.typechecker import typecheck
+        self.reg = schema.load("dataform")
+        self.struct = registry_to_schema(self.reg)
+        self.optimize, self.to_json, self.typecheck = optimize, to_json, typecheck
+
+    def plan(self, where):
+        query = Query((f("doc", "title"),), t("document", "doc"), where, (), 10)
+        self.typecheck(query, self.struct)
+        return self.to_json(self.optimize(query, self.struct))
+
+    @staticmethod
+    def rows():
+        from data_ingestion.dataform.models import Document, RecordEnvelope
+        from runtime.executor import Row
+
+        def doc(title, date, kind="opinion"):
+            return Row(doc=Document(
+                envelope=RecordEnvelope(id=title, source_system="courtlistener",
+                                        source_id=title, source_record_id=title),
+                title=title, doc_type=kind, date_issued=date))
+
+        return [doc("old-2019", "2019-06-01"), doc("new-2021", "2021-03-04"),
+                doc("edge-2020", "2020-01-01"), doc("older-1999", "1999-12-31")]
+
+    def kept(self, where):
+        from runtime.executor import execute
+        out = execute(self.plan(where), rows=self.rows())
+        degraded = sum(stage.get("degraded", 0) for stage in out["funnel"]["stages"])
+        self.assertEqual(degraded, 0, "the executor could not evaluate the predicate")
+        return sorted(r["title"] for r in out["results"])
+
+    def test_a_date_predicate_filters(self):
+        for literal in (Date("2020-01-01"), "2020-01-01"):
+            with self.subTest(literal=literal):
+                self.assertEqual(
+                    self.kept(Comparison(Op.GE, f("doc", "date_issued"), literal)),
+                    ["edge-2020", "new-2021"])   # inclusive at the boundary
+
+    def test_between_dates_filters(self):
+        self.assertEqual(
+            self.kept(Between(f("doc", "date_issued"), Date("2020-01-01"), Date("2020-12-31"))),
+            ["edge-2020"])
+
+    def test_the_other_exact_shapes_filter_too(self):
+        self.assertEqual(self.kept(Like(f("doc", "title"), "%2021%")), ["new-2021"])
+        self.assertEqual(self.kept(InList(f("doc", "doc_type"), ("opinion",))),
+                         ["edge-2020", "new-2021", "old-2019", "older-1999"])
+        self.assertEqual(
+            self.kept(And((Comparison(Op.GE, f("doc", "date_issued"), Date("2020-01-01")),
+                           Comparison(Op.EQ, f("doc", "doc_type"), "opinion")))),
+            ["edge-2020", "new-2021"])
+
+
 class TestWireValidation(unittest.TestCase):
     def test_query_requires_v2_fields(self):
         errors = serde.decode_errors({"kind": "Query", "select": [], "source": "cluster"})
@@ -234,7 +338,14 @@ class TestWireValidation(unittest.TestCase):
     def test_legacy_column_field_is_rejected(self):
         wire = serde.encode(q())
         wire["select"][0] = {"kind": "FieldRef", "source": "cluster", "column": "id"}
-        self.assertIn("unexpected_key", codes(serde.decode_errors(wire)))
+        # The legacy key itself is ignored; what fails is the missing v2 `path`.
+        self.assertIn("bad_field_path", codes(serde.decode_errors(wire)))
+
+    def test_unknown_keys_are_ignored(self):
+        wire = serde.encode(q())
+        wire["order_by"] = []
+        wire["select"][0]["note"] = "extra"
+        self.assertEqual(serde.decode_errors(wire), [])
 
     def test_legacy_bare_source_is_rejected(self):
         wire = serde.encode(q())
