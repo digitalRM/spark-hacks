@@ -6,13 +6,17 @@ types. Deliberately not part of the type system: types describe shape, this desc
 size and provenance, and this is the file a second corpus context replaces wholesale.
 
     ScalarType     -> ScalarStats       tokens, embeddability
-    CollectionType -> CollectionStats   fanout
+    CollectionType -> CollectionStats   fanout and coverage
     OptionalType   -> OptionalStats     coverage
     ObjectType     -> ObjectStats       a map, same as the type
 
-Coverage falling out of OptionalType is the useful part: only ~13% of dockets have an
-argument recording, and that is a property of the field being optional, not of the ASR
-that transcribes it. It makes the derivation an early filter for free.
+Coverage is the useful part: only ~13% of dockets have an argument recording, so
+docket.argument is an empty sequence for the other 87%. That makes the ASR that produces
+it an early filter as well as a cost, which is the single most consequential number in
+the flagship query's plan.
+
+Field names here track query_language/schema.py's registry, since that is what the
+compiler emits against and what bridge.py hands the typechecker. They must not drift.
 
 Derivations are the exception to the hierarchy, because a derivation is an *edge* between
 two paths and edges do not live in trees. They stay a flat map.
@@ -52,9 +56,17 @@ class ScalarStats:
 
 @dataclass(frozen=True)
 class CollectionStats:
-    """fanout is expected elements per parent record — 47 pages per cluster."""
+    """fanout is expected elements per *non-empty* parent — 47 pages per scanned cluster.
+
+    coverage is the fraction of parent records where the collection is non-empty. Below
+    1.0 the collection is also a filter: a docket with no argument recording yields an
+    empty sequence, cannot satisfy a predicate over it, and should narrow the plan before
+    the expensive part rather than be transcribed with nothing to transcribe. Keeping the
+    two numbers apart matters — folding them into one fanout would make a rare recording
+    look like a short one."""
     fanout: float
     element: 'FieldStats'
+    coverage: float = 1.0
     provenance: Provenance = Provenance.PLACEHOLDER
 
 @dataclass(frozen=True)
@@ -135,9 +147,10 @@ def fanout(s: CorpusStats, p: FieldRef) -> float:
         case _: return 1.0
 
 def coverage(s: CorpusStats, p: FieldRef) -> float:
-    """Fraction of parent records where the field is present. 1.0 unless Optional."""
+    """Fraction of parent records where the field is present and non-empty."""
     match field_stats(s, p):
-        case OptionalStats(coverage=c): return c
+        case OptionalStats(coverage=c):   return c
+        case CollectionStats(coverage=c): return c
         case _: return 1.0
 
 def avg_tokens(s: CorpusStats, p: FieldRef) -> float:
@@ -203,15 +216,18 @@ LEGAL = CorpusStats(
             id=ScalarStats(), court_id=ScalarStats(), docket_number=ScalarStats(),
             case_name=ScalarStats(embeddable=True, avg_tokens=12.0),
             date_filed=ScalarStats(),
-            # Audio coverage is the reason §2 demands the three-modality intersection be
-            # validated before the demo depends on it.
-            argument_audio=OptionalStats(0.13, ScalarStats()))),
+            # The 13% is why §2 demands the three-modality intersection be validated
+            # before the demo depends on it existing at all.
+            argument=CollectionStats(320.0, ScalarStats(embeddable=True, avg_tokens=55.0),
+                                     coverage=0.13))),
         'cluster': TableStats(32_000.0, _obj(
             id=ScalarStats(), docket_id=ScalarStats(),
             case_name=ScalarStats(embeddable=True, avg_tokens=12.0),
             date_filed=ScalarStats(), precedential_status=ScalarStats(),
-            scan_pdf_url=OptionalStats(0.62, ScalarStats()),
-            scan_pages=CollectionStats(47.0, ScalarStats()))),
+            scan_pdf_url=ScalarStats(),
+            scan_pages=CollectionStats(47.0, ScalarStats(), coverage=0.62),
+            scan_text=CollectionStats(47.0, ScalarStats(embeddable=True, avg_tokens=640.0),
+                                      coverage=0.62))),
         'opinion': TableStats(40_000.0, _obj(
             id=ScalarStats(), cluster_id=ScalarStats(), author_str=ScalarStats(),
             type=ScalarStats(),
@@ -223,27 +239,25 @@ LEGAL = CorpusStats(
             cited_cite=ScalarStats())),
         'scan_page': TableStats(1_504_000.0, _obj(
             id=ScalarStats(), cluster_id=ScalarStats(), page_no=ScalarStats(),
-            image_path=ScalarStats(), dpi=ScalarStats(),
+            image_path=ScalarStats(), pdf_path=ScalarStats(), dpi=ScalarStats(),
             parsed_text=ScalarStats(embeddable=True, avg_tokens=640.0))),
         'audio': TableStats(3_640.0, _obj(
             id=ScalarStats(), docket_id=ScalarStats(), local_path=ScalarStats(),
-            duration_s=ScalarStats(),
-            segments=CollectionStats(320.0, _obj(
-                start_s=ScalarStats(), end_s=ScalarStats(), speaker=ScalarStats(),
-                transcript=ScalarStats(embeddable=True, avg_tokens=55.0))))),
+            source_url=ScalarStats(), duration_s=ScalarStats())),
+        'audio_segment': TableStats(1_164_800.0, _obj(
+            id=ScalarStats(), audio_id=ScalarStats(), start_s=ScalarStats(),
+            end_s=ScalarStats(), speaker=ScalarStats(),
+            transcript=ScalarStats(embeddable=True, avg_tokens=55.0))),
     }),
     derivations=FrozenDict.of({
         FieldRef('cluster', ('scan_pages',)): DerivationSpec(
             FieldRef('cluster', ('scan_pages',)), FieldRef('cluster', ('scan_pdf_url',)),
             Derivation.RASTERIZE, 'NONE', 47.0, 0.031),      # bespoke, no model
-        FieldRef('scan_page', ('parsed_text',)): DerivationSpec(
-            FieldRef('scan_page', ('parsed_text',)), FieldRef('scan_page', ('image_path',)),
-            Derivation.DOC_PARSE, 'DOC_PARSE_MODEL', 1.0, 0.44),
-        # Sourced from the docket's *optional* recording, not from audio.local_path:
-        # the derivation's input is the thing that might not exist, and that absence is
-        # what makes ASR an early filter rather than pure cost.
-        FieldRef('audio', ('segments',)): DerivationSpec(
-            FieldRef('audio', ('segments',)), FieldRef('docket', ('argument_audio',)),
+        FieldRef('cluster', ('scan_text',)): DerivationSpec(
+            FieldRef('cluster', ('scan_text',)), FieldRef('cluster', ('scan_pages',)),
+            Derivation.DOC_PARSE, 'DOC_PARSE_MODEL', 47.0, 0.44),
+        FieldRef('docket', ('argument',)): DerivationSpec(
+            FieldRef('docket', ('argument',)), FieldRef('audio', ('local_path',)),
             Derivation.ASR, 'ASR_MODEL', 320.0, 94.0),
         FieldRef('opinion', ('chunks',)): DerivationSpec(
             FieldRef('opinion', ('chunks',)), FieldRef('opinion', ('plain_text',)),

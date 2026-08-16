@@ -251,10 +251,11 @@ def _visit(n: PlanNode, est: StaticEstimator, stages: list[StageMetrics],
                 case Materialize(source=src, produces=prod, bound_model=model):
                     d = derivation(est.stats, prod)
                     per = d.seconds_per_source_unit if d else est.unit_cost_s(model)
-                    cov = coverage(est.stats, src)
-                    # A derivation produces rather than filters, except where the source
-                    # is simply absent: a docket with no recording cannot satisfy an
-                    # audio predicate, so coverage narrows before the expensive part.
+                    cov = coverage(est.stats, prod)
+                    # A derivation produces rather than filters, except where it has
+                    # nothing to produce from: a docket with no recording yields an empty
+                    # sequence, cannot satisfy a predicate over it, and so coverage
+                    # narrows the plan before the expensive part rather than after.
                     calls = rows_in * cov
                     secs = calls * per
                     remote = calls if est.is_remote(model) else 0.0

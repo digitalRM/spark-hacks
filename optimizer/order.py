@@ -151,7 +151,7 @@ class _Block:
         ) - self.produces
 
         fanout = exp.fanout if exp is not None else 1.0
-        cov = coverage(stats, mat.source) if mat is not None else 1.0
+        cov = coverage(stats, mat.produces) if mat is not None else 1.0
         d = derivation(stats, mat.produces) if mat is not None else None
         mat_secs = d.seconds_per_source_unit if d is not None else 0.0
         per_call = (est.unit_cost_s(filt.bound_model)
