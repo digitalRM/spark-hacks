@@ -36,11 +36,13 @@ for _p in (Path(__file__).resolve().parent, _REPO_ROOT, _REPO_ROOT / "data_inges
     if str(_p) not in sys.path:
         sys.path.insert(0, str(_p))
 
-from data_ingestion.dataform.models import AudioAsset, Document, ImageAsset  # noqa: E402
+from data_ingestion.dataform.models import (  # noqa: E402
+    AudioAsset, Citation, Document, Event, ImageAsset, Organization, Person, Proceeding,
+)
 from data_ingestion.dataform.store import Store  # noqa: E402
 from optimizer.plan import (  # noqa: E402
     Aggregate, Collapse, Column, ExactFilter, Expand, Limit, Materialize, PlanNode,
-    PredicateClass, Project, Retrieve, Scan, SemanticFilter, SemanticJoin, Union, grain,
+    PredicateClass, Project, Retrieve, Scan, SemanticFilter, SemanticJoin, Union, grain, walk,
 )
 from optimizer.plan_editing import node_of  # noqa: E402  JSON -> PlanNode
 from query_language.ast import FieldRef  # noqa: E402
@@ -49,6 +51,31 @@ import model_endpoints  # noqa: E402  sibling module
 
 # The executor is real now; the driver's seam_status stops reporting `stub`.
 STUB = False
+
+# The store is one table per canonical entity; a dataform Scan names logical tables that
+# map straight onto those pydantic models. Each store table has a `data` JSON blob plus a
+# few indexed columns (id, source_system, source_id, doc_type, date).
+_TABLE_MODEL: dict[str, Any] = {
+    "document": Document, "proceeding": Proceeding, "organization": Organization,
+    "person": Person, "citation": Citation, "event": Event,
+}
+_INDEXED_COLS = {"doc_type", "source_system", "source_id"}
+
+# The optimizer leaves the dataform semantic nodes UNBOUND (its model-binding pass is
+# calibrated for the courtlistener schema). Bind them to the local models by predicate
+# class so real execution has something to call.
+_DEFAULT_MODEL = {
+    "SEM": "UNVERIFIED-sem-lightning-local",
+    "AUDIO": "UNVERIFIED-sem-lightning-local",
+    "VISUAL": "UNVERIFIED-vlm-nano-local",
+}
+
+
+def _endpoint_for(node: SemanticFilter):
+    key = node.bound_model
+    if key == "UNBOUND" or key not in model_endpoints.REGISTRY:
+        key = _DEFAULT_MODEL[node.predicate_class.value.upper()]
+    return model_endpoints.resolve(key)
 
 
 # ---------------------------------------------------------------------------
@@ -112,6 +139,7 @@ class _Ctx:
     store: Store
     stages: list[_Stage] = field(default_factory=list)
     memo: dict[tuple, tuple[bool, float, str]] = field(default_factory=dict)  # (model,text,content)->verdict
+    scan_queries: dict[str, tuple[str, tuple]] = field(default_factory=dict)  # scan node_id -> (sql, params)
 
     def record(self, s: _Stage) -> None:
         self.stages.append(s)
@@ -173,9 +201,9 @@ async def _judge(ep, content: str, image_ref: str | None, predicate: str, client
 
 async def _run_semantic(node: SemanticFilter, rows: list[Row], ctx: _Ctx) -> list[Row]:
     from openai import AsyncOpenAI
-    ep = model_endpoints.resolve(node.bound_model)
+    ep = _endpoint_for(node)  # resolves UNBOUND -> a default local model by predicate class
     if node.predicate_class.value.upper() not in ep.serves:
-        raise ValueError(f"{node.node_id}: {node.bound_model} cannot serve "
+        raise ValueError(f"{node.node_id}: {ep.calibration_key} cannot serve "
                          f"{node.predicate_class.value.upper()}")
     client = AsyncOpenAI(base_url=ep.base_url, api_key="not-needed-locally")
     sem = asyncio.Semaphore(4 if not ep.is_remote else 2)
@@ -216,16 +244,59 @@ async def _run_semantic(node: SemanticFilter, rows: list[Row], ctx: _Ctx) -> lis
 # Tree walk
 # ---------------------------------------------------------------------------
 
-def _scan(node: Scan, ctx: _Ctx) -> list[Row]:
-    """Run the node's SQL against the store and parse each row's JSON blob into a Document.
+# A downstream semantic stage costs a model call per row, so bound the candidates a Scan
+# loads. Tight when a semantic filter follows (each row may cost ~20s on a reasoning model),
+# generous for a pure-metadata query.
+_SCAN_CAP_SEMANTIC = 15
+_SCAN_CAP_PLAIN = 200
 
-    The store is one-table-per-entity with a `data` JSON column, so a Scan over the
-    dataform corpus selects `data` and we revive the pydantic object. (The relational
-    cluster/docket schema the courtlistener fixtures assume is a different physical layout
-    -- see the deployment notes; this path targets the ingested dataform db.)"""
+
+def _plan_scan_query(root: PlanNode, scan: Scan) -> tuple[str, tuple]:
+    """Turn a dataform Scan into a real SQL query over the JSON-blob store.
+
+    The optimizer emits `node.sql` as a relational FROM-fragment (e.g. `document AS doc`)
+    that assumes real columns; the store keeps each record as a `data` JSON blob. So we
+    ignore that fragment and build our own SELECT, pushing down what makes execution both
+    fast and honest: indexed-column EXACT filters, and NOT-NULL on the field a downstream
+    SEM will read (no point scanning rows that lack it). Single-table shape only; joins are
+    not handled here yet."""
+    table = scan.tables[0]
+    if table not in _TABLE_MODEL:
+        raise NotImplementedError(f"{scan.node_id}: no store mapping for table {table!r}")
+
+    where: list[str] = []
+    params: list[Any] = []
+    has_semantic = False
+    for n in walk(root):
+        if isinstance(n, ExactFilter):
+            m = _EXACT_RE.search(n.predicate)
+            if m and m["op"] == "=" and m["lhs"].split(".")[-1] in _INDEXED_COLS:
+                where.append(f'{m["lhs"].split(".")[-1]} = ?')
+                params.append(m["rhs"])
+        elif isinstance(n, SemanticFilter):
+            has_semantic = True
+            if n.predicate_class == PredicateClass.SEM and n.field.path:
+                jp = "$." + ".".join(n.field.path)
+                where.append(f"json_extract(data, '{jp}') IS NOT NULL "
+                             f"AND length(json_extract(data, '{jp}')) > 0")
+
+    sql = f"SELECT data FROM {table}"
+    if where:
+        sql += " WHERE " + " AND ".join(where)
+    sql += f" LIMIT {_SCAN_CAP_SEMANTIC if has_semantic else _SCAN_CAP_PLAIN}"
+    return sql, tuple(params)
+
+
+def _scan(node: Scan, ctx: _Ctx) -> list[Row]:
+    """Load rows from the JSON-blob store and revive each `data` blob into its pydantic model.
+
+    Uses the SQL computed by _plan_scan_query (stashed on ctx), not the optimizer's
+    relational fragment."""
     t0 = time.perf_counter()
-    cur = ctx.store.conn.execute(node.sql, node.params)
-    rows = [Row(Document.model_validate_json(r["data"])) for r in cur.fetchall()]
+    model = _TABLE_MODEL.get(node.tables[0], Document)
+    sql, params = ctx.scan_queries.get(node.node_id, (f"SELECT data FROM {node.tables[0]} LIMIT 200", ()))
+    cur = ctx.store.conn.execute(sql, params)
+    rows = [Row(model.model_validate_json(r["data"])) for r in cur.fetchall()]
     ctx.record(_Stage(node.node_id, rows_in=len(rows), rows_out=len(rows),
                       seconds=time.perf_counter() - t0))
     return rows
@@ -454,6 +525,12 @@ def execute(plan: Any, *, db_path: Path | None = None, rows: list[Row] | None = 
     root = _as_plannode(plan)
     store = Store(db_path=db_path) if db_path else Store()
     ctx = _Ctx(store=store)
+
+    # Precompute each Scan's real SQL (pushdowns need the whole pipeline, which a bottom-up
+    # walk of a single node can't see).
+    for n in walk(root):
+        if isinstance(n, Scan) and n.tables and n.tables[0] in _TABLE_MODEL:
+            ctx.scan_queries[n.node_id] = _plan_scan_query(root, n)
 
     async def go() -> list[Row]:
         if rows is not None:
