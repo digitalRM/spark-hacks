@@ -5,7 +5,7 @@ import json
 import unittest
 from pathlib import Path
 
-from query_language import checks, client, compiler, schema, serde, serialize
+from query_language import checks, client, compiler, relevance, schema, serde, serialize
 from query_language.ast import (
     Aggregator,
     AggregatorOp,
@@ -306,6 +306,7 @@ class TestCompilerLoop(unittest.TestCase):
         self.assertTrue(result.ok)
         self.assertEqual(result.ast, serde.decode(result.query))
         self.assertEqual(result.envelope()["bql_version"], "2.0")
+        self.assertIs(result.envelope()["is_legal"], True)
         self.assertEqual(result.envelope()["bql"], result.printed)
         self.assertIn("select", result.envelope()["bql"])
 
@@ -346,6 +347,62 @@ class TestCompilerLoop(unittest.TestCase):
     def test_aggregation_is_now_expressible_but_ordering_is_not(self):
         self.assertEqual(compiler.cannot_express("How many cases by court?"), [])
         self.assertTrue(compiler.cannot_express("Five most recent cases"))
+
+
+class TestRelevanceGate(unittest.TestCase):
+    def test_lightning_returns_strict_boolean_contract(self):
+        seen = {}
+
+        def fake_chat(messages, **kwargs):
+            seen["messages"] = messages
+            seen["kwargs"] = kwargs
+            return client.ChatResponse(
+                text='{"is_legal": true}', model="lightning-test", latency_ms=12,
+            )
+
+        result = relevance.classify("cases about qualified immunity", chat_fn=fake_chat)
+        self.assertTrue(result.is_legal)
+        self.assertEqual(result.model, "lightning-test")
+        self.assertIn("legal_relevance_gate", seen["messages"][0]["content"])
+        self.assertEqual(seen["kwargs"]["model"], client.RELEVANCE_MODEL)
+        self.assertEqual(seen["kwargs"]["temperature"], 0.0)
+        self.assertEqual(seen["kwargs"]["max_tokens"], relevance.MAX_TOKENS)
+        self.assertIs(seen["kwargs"]["enable_thinking"], False)
+
+    def test_invalid_classifier_shape_fails_closed(self):
+        with self.assertRaises(client.ModelError):
+            relevance._decode('{"related": true}')
+        with self.assertRaises(client.ModelError):
+            relevance._decode('{"is_legal": "yes"}')
+
+    def test_nonlegal_input_never_reaches_compiler(self):
+        compiler_called = False
+
+        def forbidden_chat(messages, **kwargs):
+            nonlocal compiler_called
+            compiler_called = True
+            raise AssertionError("Super compiler must not run")
+
+        result = compiler.compile_question(
+            "Write me a pancake recipe",
+            registry=REG,
+            use_cache=False,
+            chat_fn=forbidden_chat,
+            relevance_fn=lambda question: relevance.RelevanceResult(
+                False, "lightning-test", 5,
+            ),
+        )
+        self.assertFalse(result.ok)
+        self.assertFalse(result.is_legal)
+        self.assertFalse(compiler_called)
+        report = result.error_report()
+        self.assertEqual(report["stage"], "relevance")
+        self.assertIs(report["is_legal"], False)
+        self.assertIn("legal research", report["message"])
+
+    def test_mock_gate_handles_legal_and_unrelated_inputs(self):
+        self.assertTrue(relevance._mock_is_legal("Find cases about qualified immunity"))
+        self.assertFalse(relevance._mock_is_legal("Give me a chocolate cake recipe"))
 
 
 class TestClientAndMock(unittest.TestCase):

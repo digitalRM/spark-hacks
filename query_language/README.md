@@ -1,7 +1,8 @@
 # Query language — natural language → JSON → BQL
 
-Step 3 sends a question to hosted Nemotron Super, validates/repairs the returned
-JSON, and renders that canonical AST as readable BQL. The JSON is the wire
+Step 3 first asks local Nemotron Lightning on Spark `:8001` whether the input is
+legal-research related. Only relevant inputs are sent to hosted Nemotron Super,
+validated/repaired as JSON, and rendered as readable BQL. The JSON is the wire
 contract defined by `ast.py` and `serde.py`; BQL text is generated from it by the
 deterministic pretty-printer, never accepted directly from the model.
 
@@ -73,6 +74,16 @@ Every compile uses a validate–repair loop. Invalid JSON, AST-shape errors, bad
 aliases, unknown nested paths, illegal joins, modality mismatches, and grouping
 errors are returned to the model with exact JSON paths for up to three attempts.
 
+## Legal relevance gate
+
+Before cache lookup or NL→JSON work, Lightning returns exactly
+`{"is_legal": true|false}`. A false decision stops the pipeline and returns a
+structured `stage: "relevance"` response; the frontend displays its existing
+plain error state. No frontend layout or component changes are required.
+
+The rejection copy can be changed with `BQL_RELEVANCE_MESSAGE`. Set
+`BQL_RELEVANCE_ENABLED=0` only when the gate must be bypassed for diagnostics.
+
 ## Frontend/API
 
 The Next.js route `POST /api/compile` invokes:
@@ -87,6 +98,11 @@ configuration is read at request time:
 | variable | default |
 |---|---|
 | `AMICUS_SCHEMA` | `courtlistener` in the CLI; `dataform` in the frontend route |
+| `SPARK_HOST` | `172.16.94.53` |
+| `RELEVANCE_MODEL` | `nvidia/nemotron-3.5-lightning` on local `:8001` |
+| `BQL_RELEVANCE_ENABLED` | `1` |
+| `BQL_RELEVANCE_MAX_TOKENS` | `64` |
+| `BQL_RELEVANCE_TIMEOUT_S` / `BQL_RELEVANCE_MAX_RETRIES` | `30` / `2` |
 | `BQL_REMOTE_BASE_URL` | `https://integrate.api.nvidia.com/v1` |
 | `COMPILER_MODEL` | `nvidia/nemotron-3-super-120b-a12b` |
 | `FALLBACK_COMPILER_MODEL` | same as `COMPILER_MODEL` (no silent local fallback) |

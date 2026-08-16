@@ -54,6 +54,8 @@ SUPER_MODEL = os.environ.get("SUPER_MODEL", "nvidia/nemotron-3-super-120b-a12b")
 # Super is much stronger at structured output and runs on NVIDIA's hosted endpoint.
 COMPILER_MODEL = os.environ.get("COMPILER_MODEL", SUPER_MODEL)
 FALLBACK_COMPILER_MODEL = os.environ.get("FALLBACK_COMPILER_MODEL", COMPILER_MODEL)
+# Cheap local gate that runs before the hosted compiler sees a question.
+RELEVANCE_MODEL = os.environ.get("RELEVANCE_MODEL", "nvidia/nemotron-3.5-lightning")
 
 # How much context to ask for. Ollama defaults to 4096 whatever the model supports,
 # and silently truncates the front of an over-long prompt, so we always say.
@@ -204,7 +206,9 @@ def fit_context(messages: list[dict[str, str]], max_tokens: int,
 # --------------------------------------------------------------------------- #
 def chat(messages: list[dict[str, str]], *, model: str | None = None,
          temperature: float = DEFAULT_TEMPERATURE,
-         max_tokens: int = MAX_TOKENS, base_url: str | None = None) -> ChatResponse:
+         max_tokens: int = MAX_TOKENS, base_url: str | None = None,
+         enable_thinking: bool | None = None, timeout_s: float = TIMEOUT_S,
+         max_retries: int = MAX_RETRIES) -> ChatResponse:
     """Send a chat completion and return the assistant's text.
 
     Hosted calls use the official OpenAI SDK against NVIDIA's compatible API and
@@ -214,6 +218,7 @@ def chat(messages: list[dict[str, str]], *, model: str | None = None,
     Cost: one round trip, or free under BQL_MOCK=1.
     """
     model = model or COMPILER_MODEL
+    thinking = ENABLE_THINKING if enable_thinking is None else enable_thinking
     if is_mock():
         return ChatResponse(text=_mock_reply(messages), model=f"mock:{model}", mock=True)
 
@@ -221,7 +226,8 @@ def chat(messages: list[dict[str, str]], *, model: str | None = None,
     if not is_local(model):
         return _hosted_chat(messages, model=model, temperature=temperature,
                             max_tokens=max_tokens, base_url=base_url,
-                            dropped=dropped)
+                            dropped=dropped, enable_thinking=thinking,
+                            timeout_s=timeout_s, max_retries=max_retries)
 
     ollama = api_for(model) == OLLAMA and base_url is None
     if ollama:
@@ -232,7 +238,7 @@ def chat(messages: list[dict[str, str]], *, model: str | None = None,
             "stream": False,
             # Ollama ignores chat_template_kwargs. THIS is the switch that works,
             # and only on /api/chat.
-            "think": ENABLE_THINKING,
+            "think": thinking,
             "options": {
                 "temperature": temperature,
                 "num_predict": max_tokens,
@@ -250,18 +256,18 @@ def chat(messages: list[dict[str, str]], *, model: str | None = None,
             "top_p": TOP_P,
             "max_tokens": max_tokens,
             "stream": False,
-            "chat_template_kwargs": {"enable_thinking": ENABLE_THINKING},
+            "chat_template_kwargs": {"enable_thinking": thinking},
         }
     body = json.dumps(payload).encode()
     headers = {"Authorization": f"Bearer {api_key_for(model)}",
                "Content-Type": "application/json", "Accept": "application/json"}
 
     last: Exception | None = None
-    for attempt in range(1, MAX_RETRIES + 1):
+    for attempt in range(1, max_retries + 1):
         t0 = time.perf_counter()
         try:
             req = urllib.request.Request(url, data=body, headers=headers, method="POST")
-            with urllib.request.urlopen(req, timeout=TIMEOUT_S) as resp:
+            with urllib.request.urlopen(req, timeout=timeout_s) as resp:
                 data = json.loads(resp.read().decode())
             return _response(data, model, ollama, dropped,
                              (time.perf_counter() - t0) * 1000)
@@ -272,9 +278,9 @@ def chat(messages: list[dict[str, str]], *, model: str | None = None,
             last = ModelError(f"HTTP {e.code}: {detail}")
         except (urllib.error.URLError, TimeoutError, KeyError, json.JSONDecodeError) as e:
             last = ModelError(f"{type(e).__name__}: {e}")
-        if attempt < MAX_RETRIES:
+        if attempt < max_retries:
             time.sleep(min(2.0 ** attempt * 0.5, 8.0))
-    raise ModelError(f"{model} failed after {MAX_RETRIES} attempts at {url}: {last}")
+    raise ModelError(f"{model} failed after {max_retries} attempts at {url}: {last}")
 
 
 def _load_openai():
@@ -290,7 +296,9 @@ def _load_openai():
 
 
 def _hosted_chat(messages: list[dict[str, str]], *, model: str, temperature: float,
-                 max_tokens: int, base_url: str | None, dropped: int) -> ChatResponse:
+                 max_tokens: int, base_url: str | None, dropped: int,
+                 enable_thinking: bool, timeout_s: float,
+                 max_retries: int) -> ChatResponse:
     """Stream one NVIDIA-hosted OpenAI-compatible completion.
 
     Nemotron may emit private reasoning deltas before its answer. We record only
@@ -302,8 +310,8 @@ def _hosted_chat(messages: list[dict[str, str]], *, model: str, temperature: flo
         sdk = _load_openai()(
             base_url=endpoint,
             api_key=api_key_for(model),
-            timeout=TIMEOUT_S,
-            max_retries=MAX_RETRIES,
+            timeout=timeout_s,
+            max_retries=max_retries,
         )
         t0 = time.perf_counter()
         stream = sdk.chat.completions.create(
@@ -313,7 +321,7 @@ def _hosted_chat(messages: list[dict[str, str]], *, model: str, temperature: flo
             top_p=TOP_P,
             max_tokens=max_tokens,
             extra_body={
-                "chat_template_kwargs": {"enable_thinking": ENABLE_THINKING},
+                "chat_template_kwargs": {"enable_thinking": enable_thinking},
                 "reasoning_budget": REASONING_BUDGET,
             },
             stream=True,

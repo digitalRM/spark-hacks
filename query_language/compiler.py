@@ -26,7 +26,7 @@ from dataclasses import dataclass, field as dc_field
 from pathlib import Path
 from typing import Any, Callable
 
-from . import checks, client, schema, serde
+from . import checks, client, relevance, schema, serde
 from .ast import (Aggregator, AggregatorOp, And, Between, Comparison,
                   ComparisonOperator as Op, FieldRef, Fuzzy, InList, Join, Like,
                   Not, Or, Query, TableRef, Unnest)
@@ -42,6 +42,7 @@ CACHE_DIR = Path(os.environ.get("BQL_CACHE_DIR", Path(__file__).resolve().parent
 EXAMPLES_DIR = Path(__file__).resolve().parent / "examples"
 
 ChatFn = Callable[..., client.ChatResponse]
+RelevanceFn = Callable[[str], relevance.RelevanceResult]
 
 
 @dataclass
@@ -57,6 +58,8 @@ class CompileResult:
     schema_name: str = ""
     cached: bool = False
     latency_ms: float = 0.0
+    is_legal: bool = True
+    relevance_model: str = ""
     # Parts of the question the language cannot express. The query is still valid;
     # it just answers something narrower than what was asked.
     warnings: list[str] = dc_field(default_factory=list)
@@ -72,6 +75,7 @@ class CompileResult:
         if not self.ok or self.query is None:
             raise ValueError("cannot build an envelope from a failed compile")
         envelope = {"bql_version": BQL_VERSION, "schema": self.schema_name,
+                    "is_legal": self.is_legal,
                     "question": self.question, "query": self.query,
                     "bql": self.printed}
         if self.warnings:
@@ -80,13 +84,17 @@ class CompileResult:
 
     def error_report(self) -> dict[str, Any]:
         """A structured failure, safe to return over HTTP or show in a UI."""
-        return {"ok": False, "stage": "compile", "question": self.question,
+        return {"ok": False,
+                "stage": "relevance" if not self.is_legal else "compile",
+                "is_legal": self.is_legal, "question": self.question,
                 "message": self.message(), "errors": list(self.errors),
                 "warnings": list(self.warnings), "attempts": self.attempts}
 
     def message(self) -> str:
         if self.ok:
             return "ok"
+        if not self.is_legal:
+            return relevance.REJECTION_MESSAGE
         if not self.errors:
             return "the compiler produced no query"
         head = "; ".join(str(e) for e in self.errors[:3])
@@ -102,10 +110,12 @@ class CompileResult:
         return failed
 
     def to_dict(self) -> dict[str, Any]:
-        return {"ok": self.ok, "question": self.question, "query": self.query,
+        return {"ok": self.ok, "is_legal": self.is_legal,
+                "question": self.question, "query": self.query,
                 "bql": self.printed, "printed": self.printed,
                 "errors": list(self.errors), "attempts": self.attempts,
                 "model": self.model, "schema": self.schema_name, "cached": self.cached,
+                "relevance_model": self.relevance_model,
                 "warnings": list(self.warnings), "latency_ms": round(self.latency_ms, 1)}
 
 
@@ -468,6 +478,7 @@ def check_payload(obj: Any, registry: schema.Registry) -> tuple[Query | None, li
 def compile_question(question: str, *, registry: schema.Registry | None = None,
                      use_cache: bool = True, model: str | None = None,
                      chat_fn: ChatFn | None = None,
+                     relevance_fn: RelevanceFn | None = None,
                      max_attempts: int = MAX_ATTEMPTS) -> CompileResult:
     """Compile a question into a BQL query. Never raises for a bad model answer.
 
@@ -476,15 +487,33 @@ def compile_question(question: str, *, registry: schema.Registry | None = None,
     records every round trip. A transport failure (no key, endpoint down) does
     raise, because that is an operator problem rather than a query problem.
 
-    Cost: free on a cache hit, otherwise 1..max_attempts model calls.
+    Cost: one small local relevance call, plus 0 calls on a query-cache hit or
+    1..max_attempts hosted compiler calls on a miss.
     """
     t0 = time.perf_counter()
     reg = registry or schema.load()
     send = chat_fn or client.chat
-    # Only probe for a live server when we are actually going to call one. An
-    # injected chat_fn means a test or a replay, and probing would be a slow no-op.
-    mdl = model or (client.COMPILER_MODEL if chat_fn else client.resolve_compiler_model())
     question = " ".join(question.split())
+
+    # An injected compiler chat function is a unit-test/replay boundary and is
+    # already preclassified unless the caller injects a relevance function too.
+    if relevance_fn is not None:
+        decision = relevance_fn(question)
+    elif chat_fn is not None:
+        decision = relevance.RelevanceResult(True, "preclassified")
+    else:
+        decision = relevance.classify(question)
+    if not decision.is_legal:
+        return CompileResult(
+            ok=False, question=question, model=decision.model,
+            schema_name=reg.name, is_legal=False,
+            relevance_model=decision.model,
+            latency_ms=(time.perf_counter() - t0) * 1000,
+        )
+
+    # Resolve the compiler only after Lightning approves the domain. An injected
+    # chat function is a test/replay and should never trigger a server probe.
+    mdl = model or (client.COMPILER_MODEL if chat_fn else client.resolve_compiler_model())
 
     if use_cache:
         hit = load_cached(question, reg.name)
@@ -493,6 +522,7 @@ def compile_question(question: str, *, registry: schema.Registry | None = None,
             if not errors and ast is not None:
                 return CompileResult(ok=True, question=question, query=hit, ast=ast,
                                      model="cache", schema_name=reg.name, cached=True,
+                                     relevance_model=decision.model,
                                      latency_ms=(time.perf_counter() - t0) * 1000)
 
     messages = build_messages(question, reg)
@@ -518,6 +548,7 @@ def compile_question(question: str, *, registry: schema.Registry | None = None,
         if not errors and ast is not None:
             result = CompileResult(ok=True, question=question, query=serde.encode(ast), ast=ast,
                                    attempts=attempts, model=resp.model, schema_name=reg.name,
+                                   relevance_model=decision.model,
                                    warnings=cannot_express(question),
                                    latency_ms=(time.perf_counter() - t0) * 1000)
             if use_cache:
@@ -529,7 +560,9 @@ def compile_question(question: str, *, registry: schema.Registry | None = None,
                                    {"role": "user", "content": repair_prompt(errors, attempt)}]
 
     return CompileResult(ok=False, question=question, errors=errors, attempts=attempts,
-                         model=mdl, schema_name=reg.name, warnings=cannot_express(question),
+                         model=mdl, schema_name=reg.name,
+                         relevance_model=decision.model,
+                         warnings=cannot_express(question),
                          latency_ms=(time.perf_counter() - t0) * 1000)
 
 

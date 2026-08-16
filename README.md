@@ -22,10 +22,16 @@ shows both forms alongside tree and plan views.
 data_ingestion.dataform
         │  schemas/dataform.json
         ▼
-hosted Nemotron Super ──► validated AST v2 JSON ──► BQL printer ──► frontend
+Lightning :8001 relevance gate ──► hosted Nemotron Super
+                                      │
+                                      ▼
+                         validated AST v2 JSON ──► BQL printer ──► frontend
 ```
 
 ## Local setup
+
+Run this setup on every machine after cloning. `.venv` and `.env.local` are
+intentionally ignored by Git and therefore do not arrive with `git pull`.
 
 ```bash
 python3 -m venv .venv
@@ -40,8 +46,9 @@ npm run dev
 ```
 
 The example environment targets hosted Nemotron Super. Add a rotated NVIDIA key
-to the ignored `frontend/.env.local`. Set `BQL_MOCK=1` when you want the full
-frontend/compiler path to run without a live model.
+to `NVIDIA_API_KEY` in the ignored `frontend/.env.local` before starting Next.js.
+Set `BQL_MOCK=1` when you want the full frontend/compiler path to run without a
+live model. Restart `npm run dev` after changing any environment value.
 
 ## Verification
 

@@ -25,6 +25,56 @@ function repositoryRoot(): string {
   return root;
 }
 
+function pythonExecutable(root: string): string {
+  const configured = process.env.PYTHON_BIN?.trim();
+  if (configured) {
+    const looksLikePath = configured.includes("/") || configured.includes("\\");
+    return path.isAbsolute(configured) || !looksLikePath
+      ? configured
+      : path.resolve(root, configured);
+  }
+  const virtualenvCandidates = [
+    path.join(root, ".venv", "bin", "python"),
+    path.join(root, ".venv", "Scripts", "python.exe"),
+  ];
+  return virtualenvCandidates.find(existsSync) ?? "python3";
+}
+
+type CompilerFailure = {
+  stdout?: string;
+  stderr?: string;
+  code?: number | string;
+  killed?: boolean;
+};
+
+function safeFailureMessage(reason: unknown, failure: CompilerFailure): string {
+  const detail = [failure.stderr, reason instanceof Error ? reason.message : ""]
+    .filter(Boolean)
+    .join("\n");
+  if (failure.code === "ENOENT" || /no such file|spawn .*enoent/i.test(detail)) {
+    return "Python was not found. From the spark-hacks root, create .venv and install both requirements files.";
+  }
+  if (/openai python sdk|no module named ['\"]?openai/i.test(detail)) {
+    return "The Python OpenAI SDK is missing. Install query_language/requirements.txt into the configured Python environment.";
+  }
+  if (/NVIDIA_API_KEY is not set/i.test(detail)) {
+    return "NVIDIA_API_KEY is not configured on this machine. Add it to frontend/.env.local and restart the dev server.";
+  }
+  if (/HTTP (401|403)|authenticationerror|permissiondenied/i.test(detail)) {
+    return "NVIDIA rejected the configured API key. Check or regenerate NVIDIA_API_KEY, then restart the dev server.";
+  }
+  if (/nemotron-3\.5-lightning|:8001/i.test(detail)) {
+    return "The legal relevance checker on Spark :8001 is unavailable. Check SPARK_HOST and the Lightning server.";
+  }
+  if (failure.code === "ETIMEDOUT" || failure.killed) {
+    return "The compiler timed out before NVIDIA returned a result.";
+  }
+  if (/repository root could not be located/i.test(detail)) {
+    return "The spark-hacks repository root could not be located. Set SPARK_HACKS_ROOT in frontend/.env.local.";
+  }
+  return "The compiler is unavailable. Complete the Python and frontend/.env.local setup, then restart the dev server.";
+}
+
 function parseCompilerJson(stdout: string): unknown {
   const start = stdout.indexOf("{");
   const end = stdout.lastIndexOf("}");
@@ -68,7 +118,7 @@ export async function POST(request: Request) {
 
   try {
     const root = repositoryRoot();
-    const python = process.env.PYTHON_BIN ?? "python3";
+    const python = pythonExecutable(root);
     const timeout = Number(process.env.BQL_COMPILE_TIMEOUT_MS ?? 300_000);
     const { stdout } = await execFileAsync(
       python,
@@ -90,7 +140,7 @@ export async function POST(request: Request) {
     );
     return Response.json(parseCompilerJson(stdout));
   } catch (reason) {
-    const failure = reason as { stdout?: string; code?: number | string };
+    const failure = reason as CompilerFailure;
     if (failure.stdout) {
       try {
         const payload = parseCompilerJson(failure.stdout);
@@ -101,12 +151,7 @@ export async function POST(request: Request) {
     }
     console.error("BQL compiler route failed", reason);
     return Response.json(
-      {
-        message:
-          failure.code === "ETIMEDOUT"
-            ? "the compiler timed out"
-            : "the compiler is unavailable; check Python and model configuration",
-      },
+      { message: safeFailureMessage(reason, failure) },
       { status: 502 },
     );
   }
