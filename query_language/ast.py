@@ -34,6 +34,7 @@ class FieldRef:
 @dataclass(frozen=True)
 class Unnest:
     ref: FieldRef  # must resolve to Array[T]; expression type is T
+    path: tuple[str, ...] = ()  # further field access into each unnested element
 
 class AggregatorOp(Enum):
     COUNT = 'count'
@@ -65,18 +66,18 @@ class Comparison:
 
 @dataclass(frozen=True)
 class InList:
-    field: FieldRef
+    field: Expression  # FieldRef or Unnest(...).path, matching Comparison/Fuzzy
     values: tuple[Literal, ...]
 
 @dataclass(frozen=True)
 class Between:
-    field: FieldRef
+    field: Expression  # FieldRef or Unnest(...).path, matching Comparison/Fuzzy
     low: Literal
     high: Literal
 
 @dataclass(frozen=True)
 class Like:
-    field: FieldRef
+    field: Expression  # FieldRef or Unnest(...).path, matching Comparison/Fuzzy
     pattern: str
 
 type Exact = Comparison | InList | Between | Like
@@ -131,7 +132,9 @@ def pp_source(s: Source) -> str:
 def pp_expression(e: Expression) -> str:
     match e:
         case FieldRef() as f: return pp_field_ref(f)
-        case Unnest(ref): return f'unnest({pp_field_ref(ref)})'
+        case Unnest(ref, path):
+            base = f'unnest({pp_field_ref(ref)})'
+            return f'{base}.{".".join(path)}' if path else base
         case Aggregator(op, None): return f'{op.value}(*)'
         case Aggregator(op, arg): return f'{op.value}({pp_expression(arg)})'
         case Date(value): return f'date "{value}"'
@@ -144,11 +147,11 @@ def pp_condition(c: Condition) -> str:
         case Comparison(op, left, right):
             return f'{pp_expression(left)} {op.value} {pp_expression(right)}'
         case InList(field, values):
-            return f'{pp_field_ref(field)} in ({", ".join(pp_expression(v) for v in values)})'
+            return f'{pp_expression(field)} in ({", ".join(pp_expression(v) for v in values)})'
         case Between(field, low, high):
-            return f'{pp_field_ref(field)} between {pp_expression(low)} and {pp_expression(high)}'
+            return f'{pp_expression(field)} between {pp_expression(low)} and {pp_expression(high)}'
         case Like(field, pattern):
-            return f'{pp_field_ref(field)} like "{pattern}"'
+            return f'{pp_expression(field)} like "{pattern}"'
         case Fuzzy(field, text):
             return f'fuzzy({pp_expression(field)}, "{text}")'
         case And(children):
