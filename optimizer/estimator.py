@@ -233,9 +233,16 @@ def _visit(n: PlanNode, est: StaticEstimator, stages: list[StageMetrics],
                     st.rows = rows_in * cov
                     _survive(st, cov)
 
-                case Expand(fanout=fan):
-                    st.frames = [*child.frames, _Frame(rows_in, fan)]
-                    st.rows = rows_in * fan
+                case Expand(fanout=fan, field=f):
+                    # fanout is elements per record *that has the field*; a record without
+                    # it contributes nothing (the executor's unnest yields no rows), so
+                    # coverage narrows here exactly as it does under Materialize. Only
+                    # 0.08% of documents carry audio: 5.6M x 235 segments is not the
+                    # number, 4.7K x 235 is.
+                    cov = coverage(est.stats, f)
+                    parents = rows_in * cov
+                    st.frames = [*child.frames, _Frame(parents, fan)]
+                    st.rows = parents * fan
                     secs = st.rows * est.bespoke_seconds_per_item
 
                 case SemanticFilter(selectivity=s, bound_model=model,

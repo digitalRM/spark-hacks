@@ -34,7 +34,7 @@ from dataclasses import dataclass, field as dc_field
 from time import perf_counter
 from typing import Any, Literal
 
-from optimizer import optimizer
+from optimizer import optimizer, stats
 from query_language import checks, client, compiler, legal_answer, relevance, schema, serde
 from query_language.ast import Query, pp_query
 from query_language.bridge import BridgeError, registry_to_schema
@@ -161,11 +161,14 @@ def typecheck_stage(ast: Query, reg: Registry) -> tuple[Stage, Schema | None]:
         return Stage('typecheck', 'failed', since(t0), str(e), (type_error(e),)), None
     return Stage('typecheck', 'ok', since(t0), detail={'sources': sorted(env)}), structural
 
-def optimize_stage(ast: Query, structural: Schema) -> tuple[Stage, dict[str, Any] | None]:
-    """BQL AST to an ExecutionPlan plus one snapshot per pass."""
+def optimize_stage(ast: Query, structural: Schema, reg: Registry) -> tuple[Stage, dict[str, Any] | None]:
+    """BQL AST to an ExecutionPlan plus one snapshot per pass.
+
+    Planned against the stats of the schema the query was compiled for -- the same name
+    resolves the registry, its structural schema and its measured corpus statistics."""
     t0 = perf_counter()
     try:
-        plan = optimizer.to_json(optimizer.optimize(ast, structural))
+        plan = optimizer.to_json(optimizer.optimize(ast, structural, stats.load(reg.name)))
     except Exception as e:
         return Stage('optimize', 'failed', since(t0), f'{type(e).__name__}: {e}'), None
     return Stage('optimize', 'ok', since(t0),
@@ -258,7 +261,7 @@ def run(question: str, *, schema_name: str | None = None, use_cache: bool = True
                         [routed, compiled, checked, *skipped(rest[2:], why)],
                         ok=True, result=result)
 
-    planned, plan = optimize_stage(result.ast, structural)
+    planned, plan = optimize_stage(result.ast, structural, reg)
     if plan is None:
         return envelope(question, reg, 'compile',
                         [routed, compiled, checked, planned,

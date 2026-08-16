@@ -240,12 +240,12 @@ def _smoke() -> None:
     from optimizer.estimator import StaticEstimator, estimate
     from optimizer.plan_editing import (blocks, anchor, node_json, node_of, render_funnel,
                                         render_plan, snapshot_json, validate)
-    from optimizer.stats import ACTIVE
+    from optimizer.stats import load, path_str
 
-    est = StaticEstimator()
-    derived = frozenset(str(k) for k in ())  # validate() takes qualified name strings
-    from optimizer.stats import path_str
-    derived = frozenset(path_str(k) for k in ACTIVE.derivations)
+    # The flagship plan targets the courtlistener schema, whatever $AMICUS_SCHEMA says.
+    stats = load('courtlistener')
+    est = StaticEstimator(stats)
+    derived = frozenset(path_str(k) for k in stats.derivations)  # validate() takes names
     eligible = {name: m.predicate_classes for name, m in est.models.items()}
 
     snaps = snapshots()

@@ -30,7 +30,7 @@ from optimizer.plan import (
     PredicateClass, Project, Provenance, Scan, SelectivitySource, SemanticFilter, Union,
     Aggregate, grain,
 )
-from optimizer.stats import ACTIVE, CorpusStats, derivation, fanout
+from optimizer.stats import ACTIVE, CorpusStats, derivation, fanout, fanout_provenance
 
 UNBOUND = 'UNBOUND'
 """Placeholder model. Binding is pass 3's job; lowering only records that a model is
@@ -221,7 +221,7 @@ def _fuzzy(f: Fuzzy, child: PlanNode, ctx: _Ctx, negated: bool) -> PlanNode:
             rooted = ctx.rooted(ref)
             child = _materialize(rooted, child, ctx)
             child = Expand(ctx.nid('expand'), rooted, fanout(ctx.stats, rooted),
-                           Provenance.PLACEHOLDER, child)
+                           fanout_provenance(ctx.stats, rooted), child)
             inner = grain(child)
             filt = _semantic(f, cls, rooted, child, ctx, negated)
             # The element stays live if the query projects it, and a Collapse would throw

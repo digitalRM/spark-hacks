@@ -34,14 +34,13 @@ from optimizer.stats import ACTIVE, CorpusStats
 PASSES: tuple[str, ...] = ('lower',)
 """Every pass that runs, in order. P1..P11 from the design doc append here."""
 
-_ESTIMATOR: StaticEstimator | None = None
+_ESTIMATORS: dict[int, StaticEstimator] = {}
 
-def estimator() -> StaticEstimator:
-    """One estimator per process. Constructing it reads calibration.json, so it is not
-    something to do per request."""
-    global _ESTIMATOR
-    if _ESTIMATOR is None: _ESTIMATOR = StaticEstimator()
-    return _ESTIMATOR
+def estimator(stats: CorpusStats = ACTIVE) -> StaticEstimator:
+    """One estimator per CorpusStats object per process (stats.load caches those).
+    Constructing one reads calibration.json, so it is not something to do per request."""
+    if id(stats) not in _ESTIMATORS: _ESTIMATORS[id(stats)] = StaticEstimator(stats)
+    return _ESTIMATORS[id(stats)]
 
 @dataclass(frozen=True)
 class Optimized:
@@ -49,6 +48,8 @@ class Optimized:
     plan: PlanNode
     snapshots: tuple[Snapshot, ...]
     warnings: tuple[PlanWarning, ...] = ()
+    stats: CorpusStats = ACTIVE
+    """What the plan was costed against, so the funnel is estimated with the same."""
 
 def optimize(ast: Query, schema: Schema, stats: CorpusStats = ACTIVE) -> Optimized:
     """Turn a typechecked query into an execution plan.
@@ -62,13 +63,13 @@ def optimize(ast: Query, schema: Schema, stats: CorpusStats = ACTIVE) -> Optimiz
     plan = lower(ast, schema, stats)
     note = ('structural lowering only: every predicate is its own operator in written '
             'order, nothing pushed down, reordered, bound, or exited early')
-    return Optimized(plan, (Snapshot('lower', note, plan),))
+    return Optimized(plan, (Snapshot('lower', note, plan),), stats=stats)
 
 def is_bound(plan: PlanNode) -> bool:
     """Whether every node that needs a model has one."""
     return all(getattr(n, 'bound_model', UNBOUND) != UNBOUND for n in walk(plan))
 
-def funnel_for(plan: PlanNode):
+def funnel_for(plan: PlanNode, stats: CorpusStats = ACTIVE):
     """The predicted funnel for a plan, or None when the plan cannot honestly be costed.
 
     Lowering binds nothing, and `unit_cost_s` prices an unknown model at 1e9 seconds as a
@@ -78,14 +79,14 @@ def funnel_for(plan: PlanNode):
     is worse than no estimate at all (spec section 8.1).
     """
     if not is_bound(plan): return None
-    try: return estimate(plan, estimator())
+    try: return estimate(plan, estimator(stats))
     except Exception: return None
 
 def to_json(o: Optimized) -> dict[str, Any]:
     """The wire form the plan pane steps through. Free apart from the costing walks."""
     return {
         'passes': list(PASSES),
-        'snapshots': [snapshot_json(s, funnel_for(s.plan)) for s in o.snapshots],
+        'snapshots': [snapshot_json(s, funnel_for(s.plan, o.stats)) for s in o.snapshots],
         'warnings': [warning_json(w) for w in o.warnings],
         'blocking': any(w.blocking for w in o.warnings),
     }

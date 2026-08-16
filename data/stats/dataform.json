@@ -1,0 +1,556 @@
+{
+ "_README": "Written by scripts/bootstrap_corpus.py. Numbers optimizer.stats overlays on the registry of the same name. Do not edit by hand; re-run the script.",
+ "schema": "dataform",
+ "db": "/home/acer01/amicus-dataform/data/dataform.db",
+ "measured_at": "2026-08-16T12:44:29+00:00",
+ "method": "exact",
+ "chars_per_token": 4.0,
+ "tables": {
+  "organization": {
+   "rows": 3384,
+   "provenance": "measured",
+   "partitions": {
+    "source_system": {
+     "courtlistener": 3361,
+     "oyez": 23
+    }
+   },
+   "fields": {
+    "envelope.id": {
+     "kind": "text",
+     "coverage": 1.0,
+     "provenance": "measured",
+     "avg_tokens": 9.0
+    },
+    "envelope.source_system": {
+     "kind": "text",
+     "coverage": 1.0,
+     "provenance": "measured",
+     "avg_tokens": 3.235
+    },
+    "org_type": {
+     "kind": "text",
+     "coverage": 1.0,
+     "provenance": "measured",
+     "avg_tokens": 1.25
+    },
+    "name": {
+     "kind": "text",
+     "coverage": 1.0,
+     "provenance": "measured",
+     "avg_tokens": 9.122
+    },
+    "short_name": {
+     "kind": "text",
+     "coverage": 0.993203,
+     "provenance": "measured",
+     "avg_tokens": 7.558
+    },
+    "jurisdiction": {
+     "kind": "text",
+     "coverage": 0.999704,
+     "provenance": "measured",
+     "avg_tokens": 0.497487
+    },
+    "parent_org_id": {
+     "kind": "unknown",
+     "coverage": 0.0,
+     "provenance": "measured"
+    }
+   }
+  },
+  "person": {
+   "rows": 22114,
+   "provenance": "measured",
+   "partitions": {
+    "source_system": {
+     "courtlistener": 16191,
+     "oyez": 5923
+    }
+   },
+   "fields": {
+    "envelope.id": {
+     "kind": "text",
+     "coverage": 1.0,
+     "provenance": "measured",
+     "avg_tokens": 9.0
+    },
+    "envelope.source_system": {
+     "kind": "text",
+     "coverage": 1.0,
+     "provenance": "measured",
+     "avg_tokens": 2.647
+    },
+    "role_types": {
+     "kind": "array",
+     "coverage": 1.0,
+     "provenance": "measured",
+     "fanout": 1.0,
+     "element_avg_tokens": 1.455
+    },
+    "name_first": {
+     "kind": "text",
+     "coverage": 1.0,
+     "provenance": "measured",
+     "avg_tokens": 1.411
+    },
+    "name_last": {
+     "kind": "text",
+     "coverage": 1.0,
+     "provenance": "measured",
+     "avg_tokens": 1.637
+    },
+    "political_affiliations": {
+     "kind": "array",
+     "coverage": 0.0,
+     "provenance": "measured",
+     "fanout": 0.0
+    },
+    "photo_ref": {
+     "kind": "text",
+     "coverage": 0.00199,
+     "provenance": "measured",
+     "avg_tokens": 23.955
+    }
+   }
+  },
+  "position": {
+   "rows": 0,
+   "provenance": "measured",
+   "partitions": {},
+   "fields": {
+    "envelope.id": {
+     "kind": "null",
+     "coverage": 0.0,
+     "provenance": "measured"
+    },
+    "person_id": {
+     "kind": "null",
+     "coverage": 0.0,
+     "provenance": "measured"
+    },
+    "organization_id": {
+     "kind": "null",
+     "coverage": 0.0,
+     "provenance": "measured"
+    },
+    "title": {
+     "kind": "null",
+     "coverage": 0.0,
+     "provenance": "measured"
+    },
+    "date_start": {
+     "kind": "null",
+     "coverage": 0.0,
+     "provenance": "measured"
+    },
+    "date_end": {
+     "kind": "null",
+     "coverage": 0.0,
+     "provenance": "measured"
+    }
+   }
+  },
+  "proceeding": {
+   "rows": 14807047,
+   "provenance": "measured",
+   "partitions": {
+    "source_system": {
+     "congress": 37701,
+     "courtlistener": 14764326,
+     "oyez": 5020
+    }
+   },
+   "fields": {
+    "envelope.id": {
+     "kind": "text",
+     "coverage": 1.0,
+     "provenance": "measured",
+     "avg_tokens": 9.0
+    },
+    "envelope.source_system": {
+     "kind": "text",
+     "coverage": 1.0,
+     "provenance": "measured",
+     "avg_tokens": 3.246
+    },
+    "proceeding_type": {
+     "kind": "text",
+     "coverage": 1.0,
+     "provenance": "measured",
+     "avg_tokens": 1.0
+    },
+    "number": {
+     "kind": "text",
+     "coverage": 0.990535,
+     "provenance": "measured",
+     "avg_tokens": 2.575
+    },
+    "title": {
+     "kind": "text",
+     "coverage": 0.981383,
+     "provenance": "measured",
+     "avg_tokens": 6.686
+    },
+    "organization_id": {
+     "kind": "text",
+     "coverage": 0.997454,
+     "provenance": "measured",
+     "avg_tokens": 9.0
+    },
+    "party_ids": {
+     "kind": "array",
+     "coverage": 0.0,
+     "provenance": "measured",
+     "fanout": 0.0
+    },
+    "date_filed": {
+     "kind": "text",
+     "coverage": 0.955006,
+     "provenance": "measured",
+     "avg_tokens": 2.5
+    },
+    "status": {
+     "kind": "text",
+     "coverage": 0.002545,
+     "provenance": "extrapolated",
+     "avg_tokens": 22.444
+    },
+    "document_ids": {
+     "kind": "array",
+     "coverage": 0.0,
+     "provenance": "measured",
+     "fanout": 0.0
+    }
+   }
+  },
+  "document": {
+   "rows": 5638827,
+   "provenance": "measured",
+   "partitions": {
+    "doc_type": {
+     "bill": 38701,
+     "cfr_section": 228314,
+     "federal_register_notice": 792,
+     "opinion": 5364751,
+     "oral_argument": 4667,
+     "other": 802,
+     "statute": 800
+    },
+    "source_system": {
+     "congress": 37701,
+     "courtlistener": 5364000,
+     "ecfr": 227543,
+     "govinfo": 4916,
+     "oyez": 4667
+    }
+   },
+   "fields": {
+    "envelope.id": {
+     "kind": "text",
+     "coverage": 1.0,
+     "provenance": "measured",
+     "avg_tokens": 9.0
+    },
+    "envelope.source_system": {
+     "kind": "text",
+     "coverage": 1.0,
+     "provenance": "measured",
+     "avg_tokens": 3.148
+    },
+    "envelope.external_ids": {
+     "kind": "object",
+     "coverage": 1.0,
+     "provenance": "measured"
+    },
+    "doc_type": {
+     "kind": "text",
+     "coverage": 1.0,
+     "provenance": "measured",
+     "avg_tokens": 1.787
+    },
+    "title": {
+     "kind": "text",
+     "coverage": 0.996605,
+     "provenance": "measured",
+     "avg_tokens": 7.788
+    },
+    "citation": {
+     "kind": "text",
+     "coverage": 0.040353,
+     "provenance": "measured",
+     "avg_tokens": 3.403
+    },
+    "jurisdiction": {
+     "kind": "text",
+     "coverage": 0.040353,
+     "provenance": "measured",
+     "avg_tokens": 1.75
+    },
+    "issuing_body_id": {
+     "kind": "unknown",
+     "coverage": 0.0,
+     "provenance": "measured"
+    },
+    "date_issued": {
+     "kind": "text",
+     "coverage": 0.958819,
+     "provenance": "measured",
+     "avg_tokens": 2.5
+    },
+    "status": {
+     "kind": "text",
+     "coverage": 0.99917,
+     "provenance": "measured",
+     "avg_tokens": 2.366
+    },
+    "summary": {
+     "kind": "text",
+     "coverage": 0.14836,
+     "provenance": "measured",
+     "avg_tokens": 516.592
+    },
+    "media.text.plain_text": {
+     "kind": "unknown",
+     "coverage": 0.0,
+     "provenance": "measured"
+    },
+    "media.images": {
+     "kind": "array",
+     "coverage": 0.0,
+     "provenance": "measured",
+     "fanout": 0.0
+    },
+    "media.audio": {
+     "kind": "array",
+     "coverage": 0.000828,
+     "provenance": "measured",
+     "fanout": 1.0,
+     "element": {
+      "audio_ref": {
+       "kind": "text",
+       "coverage": 1.0,
+       "provenance": "extrapolated",
+       "avg_tokens": 24.606
+      },
+      "captured_at": {
+       "kind": "text",
+       "coverage": 0.91,
+       "provenance": "extrapolated",
+       "avg_tokens": 4.75
+      },
+      "duration_seconds": {
+       "kind": "null",
+       "coverage": 0.0,
+       "provenance": "extrapolated"
+      },
+      "location": {
+       "kind": "object",
+       "coverage": 0.27,
+       "provenance": "extrapolated"
+      },
+      "timestamp_index": {
+       "kind": "array",
+       "coverage": 0.96,
+       "provenance": "extrapolated",
+       "fanout": 218.708,
+       "element": {
+        "end_seconds": {
+         "kind": "number",
+         "coverage": 1.0,
+         "provenance": "extrapolated"
+        },
+        "speaker": {
+         "kind": "text",
+         "coverage": 0.95442,
+         "provenance": "extrapolated",
+         "avg_tokens": 4.157
+        },
+        "start_seconds": {
+         "kind": "number",
+         "coverage": 1.0,
+         "provenance": "extrapolated"
+        },
+        "text": {
+         "kind": "text",
+         "coverage": 1.0,
+         "provenance": "extrapolated",
+         "avg_tokens": 60.671
+        }
+       }
+      },
+      "transcript": {
+       "kind": "null",
+       "coverage": 0.0,
+       "provenance": "extrapolated"
+      }
+     }
+    },
+    "source_pdf_url": {
+     "kind": "text",
+     "coverage": 0.585714,
+     "provenance": "measured",
+     "avg_tokens": 14.233
+    },
+    "hierarchy_path": {
+     "kind": "text",
+     "coverage": 0.040353,
+     "provenance": "measured",
+     "avg_tokens": 18.774
+    },
+    "proceeding_id": {
+     "kind": "text",
+     "coverage": 0.958775,
+     "provenance": "measured",
+     "avg_tokens": 9.0
+    },
+    "cites": {
+     "kind": "array",
+     "coverage": 0.0,
+     "provenance": "measured",
+     "fanout": 0.0
+    }
+   }
+  },
+  "citation": {
+   "rows": 0,
+   "provenance": "measured",
+   "partitions": {},
+   "fields": {
+    "envelope.id": {
+     "kind": "null",
+     "coverage": 0.0,
+     "provenance": "measured"
+    },
+    "citing_document_id": {
+     "kind": "null",
+     "coverage": 0.0,
+     "provenance": "measured"
+    },
+    "cited_document_id": {
+     "kind": "null",
+     "coverage": 0.0,
+     "provenance": "measured"
+    },
+    "citation_string": {
+     "kind": "null",
+     "coverage": 0.0,
+     "provenance": "measured"
+    },
+    "treatment": {
+     "kind": "null",
+     "coverage": 0.0,
+     "provenance": "measured"
+    }
+   }
+  },
+  "event": {
+   "rows": 0,
+   "provenance": "measured",
+   "partitions": {},
+   "fields": {
+    "envelope.id": {
+     "kind": "null",
+     "coverage": 0.0,
+     "provenance": "measured"
+    },
+    "event_type": {
+     "kind": "null",
+     "coverage": 0.0,
+     "provenance": "measured"
+    },
+    "proceeding_id": {
+     "kind": "null",
+     "coverage": 0.0,
+     "provenance": "measured"
+    },
+    "person_id": {
+     "kind": "null",
+     "coverage": 0.0,
+     "provenance": "measured"
+    },
+    "date": {
+     "kind": "null",
+     "coverage": 0.0,
+     "provenance": "measured"
+    },
+    "description": {
+     "kind": "null",
+     "coverage": 0.0,
+     "provenance": "measured"
+    },
+    "outcome": {
+     "kind": "null",
+     "coverage": 0.0,
+     "provenance": "measured"
+    }
+   }
+  },
+  "financialdisclosure": {
+   "rows": 32336,
+   "provenance": "measured",
+   "partitions": {
+    "source_system": {
+     "courtlistener": 32336
+    }
+   },
+   "fields": {
+    "envelope.id": {
+     "kind": "text",
+     "coverage": 1.0,
+     "provenance": "measured",
+     "avg_tokens": 9.0
+    },
+    "person_id": {
+     "kind": "text",
+     "coverage": 1.0,
+     "provenance": "measured",
+     "avg_tokens": 9.0
+    },
+    "year": {
+     "kind": "number",
+     "coverage": 1.0,
+     "provenance": "measured"
+    },
+    "filepath": {
+     "kind": "text",
+     "coverage": 1.0,
+     "provenance": "measured",
+     "avg_tokens": 32.543
+    }
+   }
+  },
+  "criminalrecord": {
+   "rows": 0,
+   "provenance": "measured",
+   "partitions": {},
+   "fields": {
+    "envelope.id": {
+     "kind": "null",
+     "coverage": 0.0,
+     "provenance": "measured"
+    },
+    "person_id": {
+     "kind": "null",
+     "coverage": 0.0,
+     "provenance": "measured"
+    },
+    "name": {
+     "kind": "null",
+     "coverage": 0.0,
+     "provenance": "measured"
+    },
+    "disposition": {
+     "kind": "null",
+     "coverage": 0.0,
+     "provenance": "measured"
+    },
+    "status": {
+     "kind": "null",
+     "coverage": 0.0,
+     "provenance": "measured"
+    }
+   }
+  }
+ }
+}

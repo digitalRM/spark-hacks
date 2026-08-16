@@ -47,6 +47,25 @@ scripts/dev.sh            # API and frontend together, one environment
 | `scripts/web.sh` | the Next.js app only |
 | `scripts/setup.sh` | one-time install |
 | `scripts/env.sh` | sourced by the others; loads `.env` |
+| `scripts/bootstrap_corpus.py` | counts the corpus db into `data/stats/<schema>.json` |
+
+## Corpus statistics
+
+The optimizer plans against measured cardinalities, not guesses. `optimizer/stats.py`
+builds its picture of the corpus from two files that share a name: the schema
+`query_language/schemas/<schema>.json` gives the structure, and `data/stats/<schema>.json`
+gives the numbers — row counts, per-field coverage, fanout, token lengths, and rows per
+`doc_type`. The second file is written by counting the actual database:
+
+```bash
+python3 scripts/bootstrap_corpus.py --schema dataform --db ~/amicus-dataform/data/dataform.db
+```
+
+It verifies the db has the schema's tables before it writes anything, resolves each
+field to a real column or a JSON path in the `data` blob (so it works for any schema
+JSON, not just dataform), and takes about ten minutes for the 20 GB db on the GN100
+(`--sample 50000` for a quick pass). `python3 -m optimizer.stats` prints what the
+optimizer currently believes and marks anything still unmeasured with `?`.
 
 ## Configuration
 
@@ -66,6 +85,10 @@ return canned answers and nothing touches the network.
 
 ```bash
 python3 -m unittest discover -s query_language/tests -t .
+```
+
+```bash
+python3 -m unittest discover -s optimizer/tests -t .
 ```
 
 ```bash
