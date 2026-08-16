@@ -45,6 +45,10 @@ ROUTER_MODEL = _str('AMICUS_ROUTER_MODEL', MODEL)
 # Canned answers, no network, deterministic. For offline UI work and tests.
 MOCK = _bool('AMICUS_MOCK')
 
+# One stderr line per model call: where its seconds and tokens went. On by default --
+# every call is wall clock someone is waiting through.
+TRACE = _bool('AMICUS_TRACE', True)
+
 # Which corpus the compiler targets: `dataform` (canonical nested entities) or
 # `courtlistener` (the flat physical schema).
 SCHEMA = _str('AMICUS_SCHEMA', 'courtlistener')

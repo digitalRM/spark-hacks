@@ -8,6 +8,7 @@ are projections of the same JSON, and until this file nothing converted between 
 which is why `typecheck()` had no caller outside its own tests.
 
     TEXT          TextType()
+    DATE          DateTimeType()
     IMAGE_SET     Array | Sequence of ImageType()
     DOC_SCAN      Array | Sequence of TextType()     DOC_PARSE renders the pages as text
     TEXT_CHUNKED  Array | Sequence of TextType()
@@ -28,8 +29,8 @@ from typing import Any
 
 from .schema import FieldSpec, Registry
 from .type_system import (
-    ArrayType, AudioType, FieldType, FloatType, FrozenDict, ImageType, IntType,
-    ObjectType, Schema, SequenceType, TextType,
+    ArrayType, AudioType, DateTimeType, FieldType, FloatType, FrozenDict, ImageType,
+    IntType, ObjectType, Schema, SequenceType, TextType,
 )
 
 class BridgeError(Exception): pass
@@ -52,8 +53,9 @@ ELEMENT: dict[str, FieldType] = {
 #
 # Ids are deliberately NOT inferred: court.id is TEXT and docket.id is INTEGER in the same
 # corpus, and guessing wrong turns `docket.court_id = "ca9"` -- the most common predicate in
-# the demo -- into a type error. Dates are deliberately not inferred either; see the module
-# note in api/driver.py on the one comparison this leaves unable to typecheck.
+# the demo -- into a type error. Dates are not guessed either, and no longer need to be:
+# a date column says DATE in the schema, which is a fact the corpus states rather than one
+# this function infers from a column name.
 INT_COLUMNS = frozenset({'token_count', 'page_no', 'dpi', 'year', 'depth'})
 FLOAT_COLUMNS = frozenset({'duration_s', 'start_s', 'end_s'})
 
@@ -72,6 +74,7 @@ def field_type(spec: FieldSpec) -> FieldType:
     """The structural type of one registry field."""
     if spec.type in ELEMENT: return collection(spec, ELEMENT[spec.type])
     if spec.type == 'TEXT': return TextType()
+    if spec.type == 'DATE': return DateTimeType()
     scalar = scalar_type(spec.column)
     # dataform types a list of scalars as SCALAR carrying a fanout -- role_types, party_ids.
     return collection(spec, scalar) if spec.is_set_valued else scalar

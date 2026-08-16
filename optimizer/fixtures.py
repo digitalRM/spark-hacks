@@ -60,7 +60,7 @@ def scan(pushed: bool) -> Scan:
         'n0', ('cluster', 'docket', 'opinion', 'citation'),
         SQL if pushed else SQL.split('\n WHERE')[0],
         ('ca9', '2022-01-01', '490 U.S. 386') if pushed else (),
-        ('docket.court_id = "ca9"', 'cluster.date_filed >= "2022-01-01"',
+        ('docket.court_id = "ca9"', 'cluster.date_filed >= date "2022-01-01"',
          'citation.cited_cite = "490 U.S. 386"') if pushed else (),
         # A COUNT against the index measures this for free, so the deterministic half of
         # a plan never has to guess.
@@ -70,10 +70,13 @@ def scan(pushed: bool) -> Scan:
 
 def exact_filters(child: PlanNode) -> PlanNode:
     """Pre-pushdown: the deterministic predicates are still their own operators."""
-    for nid, pred, s in (('n0a', 'EXACT(docket.court_id = "ca9")', 0.11),
-                         ('n0b', 'EXACT(cluster.date_filed >= "2022-01-01")', 0.34),
-                         ('n0c', 'EXACT(citation.cited_cite = "490 U.S. 386")', 0.22)):
-        child = ExactFilter(nid, pred, s, child)
+    for nid, pred, sql, param, s in (
+            ('n0a', 'docket.court_id = "ca9"', 'docket.court_id = ?', 'ca9', 0.11),
+            ('n0b', 'cluster.date_filed >= date "2022-01-01"', 'cluster.date_filed >= ?',
+             '2022-01-01', 0.34),
+            ('n0c', 'citation.cited_cite = "490 U.S. 386"', 'citation.cited_cite = ?',
+             '490 U.S. 386', 0.22)):
+        child = ExactFilter(nid, pred, sql, (param,), s, child)
     return child
 
 def retrieve(child: PlanNode) -> Retrieve:

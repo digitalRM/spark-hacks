@@ -18,6 +18,7 @@ from .ast import (
     Between,
     Comparison,
     ComparisonOperator,
+    Date,
     FieldRef,
     Fuzzy,
     InList,
@@ -28,6 +29,7 @@ from .ast import (
     Query,
     TableRef,
     Unnest,
+    is_iso_8601,
 )
 
 BQL_VERSION = "2.0"
@@ -35,7 +37,7 @@ BQL_VERSION = "2.0"
 CONDITIONS = (Comparison, InList, Between, Like, Fuzzy, And, Or, Not)
 EXACTS = (Comparison, InList, Between, Like)
 CONDITION_KINDS = tuple(cls.__name__ for cls in CONDITIONS)
-EXPRESSION_KINDS = ("FieldRef", "Unnest", "Aggregator")
+EXPRESSION_KINDS = ("FieldRef", "Unnest", "Aggregator", "Date")
 SOURCE_KINDS = ("TableRef", "Join")
 OPS = tuple(op.value for op in ComparisonOperator)
 AGG_OPS = tuple(op.value for op in AggregatorOp)
@@ -95,6 +97,8 @@ def encode(node: Any) -> Any:
             return {"kind": "FieldRef", "source": source, "path": list(path)}
         case Unnest(ref):
             return {"kind": "Unnest", "ref": encode(ref)}
+        case Date(value):
+            return {"kind": "Date", "value": value}
         case Aggregator(op, arg):
             return {
                 "kind": "Aggregator",
@@ -109,9 +113,11 @@ def encode(node: Any) -> Any:
                 "field2": encode(field2),
             }
         case InList(field, values):
-            return {"kind": "InList", "field": encode(field), "values": list(values)}
+            return {"kind": "InList", "field": encode(field),
+                    "values": [encode(value) for value in values]}
         case Between(field, low, high):
-            return {"kind": "Between", "field": encode(field), "low": low, "high": high}
+            return {"kind": "Between", "field": encode(field),
+                    "low": encode(low), "high": encode(high)}
         case Like(field, pattern):
             return {"kind": "Like", "field": encode(field), "pattern": pattern}
         case Fuzzy(field, text):
@@ -240,6 +246,8 @@ def _expression(value: Any, path: str, errors: list[DecodeError]) -> Any:
     if kind == "Unnest":
         _keys(obj, path, {"ref"}, errors)
         return Unnest(_field_ref(obj.get("ref"), f"{path}.ref", errors))
+    if kind == "Date":
+        return _date_literal(obj, path, errors)
     if kind == "Aggregator":
         _keys(obj, path, {"op", "arg"}, errors)
         op = obj.get("op")
@@ -343,10 +351,27 @@ def _condition(value: Any, path: str, errors: list[DecodeError]) -> Any:
 
 
 def _literal(value: Any, path: str, errors: list[DecodeError]) -> Any:
+    if isinstance(value, dict) and value.get("kind") == "Date":
+        return _date_literal(value, path, errors)
     if not isinstance(value, _LITERAL):
-        errors.append(DecodeError(path, "expected_literal", "expected a string, number or boolean"))
+        errors.append(DecodeError(path, "expected_literal",
+                                  "expected a string, number, boolean or Date"))
         return ""
     return value
+
+
+def _date_literal(obj: dict, path: str, errors: list[DecodeError]) -> Date:
+    """A Date node, checked against the calendar rather than against a shape."""
+    _keys(obj, path, {"value"}, errors)
+    value = obj.get("value")
+    if not is_iso_8601(value):
+        errors.append(DecodeError(
+            path, "bad_date",
+            f"Date.value must be ISO-8601 -- \"YYYY-MM-DD\" or \"YYYY-MM-DDTHH:MM:SS\" "
+            f"-- and a real calendar date; got {value!r}",
+        ))
+        return Date("1970-01-01")
+    return Date(value)
 
 
 def _nonempty_string(value: Any, path: str, label: str, errors: list[DecodeError]) -> str:

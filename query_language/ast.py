@@ -1,7 +1,30 @@
 from dataclasses import dataclass
+from datetime import date as _date, datetime as _datetime
 from enum import Enum
 
-type Literal = str | int | float | bool
+@dataclass(frozen=True)
+class Date:
+    """A calendar date or instant, ISO-8601: "2020-01-01" or "2020-01-01T09:30:00".
+
+    Its own node rather than a bare string, because a string is text and text is not
+    ordered: without this, `date_filed >= "2020-01-01"` is a comparison between a
+    TEXT column and a TEXT literal, and the typechecker is right to refuse `>=` on it.
+    A Date carries the intent the quotes lose.
+    """
+    value: str
+
+def is_iso_8601(value: object) -> bool:
+    """Whether a string is a real calendar date or instant. Not a regex: 2020-13-45
+    matches every shape you would write and is not a date."""
+    if not isinstance(value, str):
+        return False
+    try:
+        (_date if len(value) == 10 else _datetime).fromisoformat(value)
+    except ValueError:
+        return False
+    return True
+
+type Literal = str | int | float | bool | Date
 
 @dataclass(frozen=True)
 class FieldRef:
@@ -111,6 +134,7 @@ def pp_expression(e: Expression) -> str:
         case Unnest(ref): return f'unnest({pp_field_ref(ref)})'
         case Aggregator(op, None): return f'{op.value}(*)'
         case Aggregator(op, arg): return f'{op.value}({pp_expression(arg)})'
+        case Date(value): return f'date "{value}"'
         case str() as x: return f'"{x}"'
         case int() | float() | bool() as x: return f'{x}'
         case _: raise TypeError(f'Unknown expression: {e!r}')

@@ -18,6 +18,7 @@ from query_language.ast import (
     Between,
     Comparison,
     ComparisonOperator as Op,
+    Date,
     FieldRef,
     Fuzzy,
     InList,
@@ -30,7 +31,10 @@ from query_language.ast import (
     Unnest,
     pp_query,
 )
+from query_language.bridge import registry_to_schema
+from query_language.type_system import DateTimeType
 from query_language.typechecker import (
+    TypeCheckError,
     example_aggregate_typecheck,
     example_schema,
     example_typecheck,
@@ -131,6 +135,94 @@ class TestCanonicalAst(unittest.TestCase):
         self.assertIn("docket as d", rendered)
         self.assertIn("count(*)", rendered)
         self.assertIn("group by d.court_id", rendered)
+
+
+class TestDates(unittest.TestCase):
+    """A date is a type, not a formatting convention. `date_filed >= "2020-01-01"` used
+    to compile and then fail typecheck, because a quoted string is text and text is not
+    ordered."""
+
+    STRUCT = registry_to_schema(REG)
+
+    def where(self, condition) -> Query:
+        return Query((f("cluster", "id"),), t("cluster"), condition, (), 10)
+
+    def test_date_columns_carry_a_date_type(self):
+        self.assertEqual(self.STRUCT["cluster"]["date_filed"], DateTimeType())
+        self.assertEqual(REG.get("cluster.date_filed").type, "DATE")
+        self.assertNotEqual(self.STRUCT["cluster"]["case_name"], DateTimeType())
+
+    def test_date_literal_round_trips(self):
+        query = self.where(Comparison(Op.GE, f("cluster", "date_filed"), Date("2020-01-01")))
+        wire = serde.encode(query)
+        self.assertEqual(wire["where"]["field2"], {"kind": "Date", "value": "2020-01-01"})
+        self.assertEqual(serde.decode(wire), query)
+
+    def test_between_dates_round_trips(self):
+        query = self.where(Between(f("cluster", "date_filed"),
+                                   Date("2023-01-01"), Date("2023-12-31")))
+        self.assertEqual(serde.decode(serde.encode(query)), query)
+
+    def test_ordering_comparisons_typecheck_on_a_date(self):
+        for literal in (Date("2020-01-01"), "2020-01-01"):
+            with self.subTest(literal=literal):
+                query = self.where(Comparison(Op.GE, f("cluster", "date_filed"), literal))
+                self.assertEqual(checks.validate(query, REG), [])
+                self.assertTrue(typecheck(query, self.STRUCT))
+
+    def test_ordering_is_still_refused_on_text(self):
+        query = self.where(Comparison(Op.GE, f("cluster", "case_name"), "Graham"))
+        with self.assertRaises(TypeCheckError):
+            typecheck(query, self.STRUCT)
+
+    def test_a_bare_string_is_only_read_as_a_date_next_to_a_date(self):
+        """The coercion is narrow on purpose: it never retypes a text column."""
+        query = self.where(Comparison(Op.EQ, f("cluster", "case_name"), "2020-01-01"))
+        self.assertTrue(typecheck(query, self.STRUCT))     # text = text, unchanged
+        mismatch = self.where(Comparison(Op.GE, f("cluster", "date_filed"), "last tuesday"))
+        with self.assertRaises(TypeCheckError):
+            typecheck(mismatch, self.STRUCT)
+
+    def test_the_calendar_decides_what_is_a_date(self):
+        wire = serde.encode(self.where(
+            Comparison(Op.GE, f("cluster", "date_filed"), Date("2020-01-01"))))
+        wire["where"]["field2"]["value"] = "2020-13-45"    # right shape, not a day
+        self.assertIn("bad_date", codes(serde.decode_errors(wire)))
+
+    def test_a_date_mistake_is_reported_to_the_repair_loop(self):
+        """checks.validate is the list the compiler hands back to the model, so a date
+        error has to appear there rather than only in the later typecheck."""
+        bad = self.where(Comparison(Op.GE, f("cluster", "date_filed"), "last tuesday"))
+        self.assertIn("bad_date_literal", codes(checks.validate(bad, REG)))
+        wrong_column = self.where(Comparison(Op.EQ, f("cluster", "case_name"),
+                                             Date("2020-01-01")))
+        self.assertIn("date_on_non_date_field", codes(checks.validate(wrong_column, REG)))
+        in_list = self.where(InList(f("cluster", "date_filed"), ("whenever",)))
+        self.assertIn("bad_date_literal", codes(checks.validate(in_list, REG)))
+
+    def test_the_prompt_and_few_shots_teach_the_date_node(self):
+        prompt = compiler.build_system_prompt(REG)
+        self.assertIn('{"kind":"Date"', prompt)
+        self.assertIn("DATE", prompt)
+        dated = [ast for _, ast in compiler.FEW_SHOTS
+                 if any(isinstance(n, Date) for n in _literals(ast))]
+        self.assertTrue(dated, "no few-shot demonstrates a Date literal")
+        for _, ast in compiler.FEW_SHOTS:
+            self.assertEqual(checks.validate(ast, REG), [])
+
+    def test_the_pretty_printer_marks_a_date(self):
+        printed = pp_query(self.where(
+            Comparison(Op.GE, f("cluster", "date_filed"), Date("2020-01-01"))))
+        self.assertIn('date "2020-01-01"', printed)
+
+
+def _literals(node):
+    """Every literal reachable from a condition tree, for the few-shot check."""
+    for condition in serde.walk_condition(node.where):
+        match condition:
+            case Comparison(_, left, right): yield from (left, right)
+            case Between(_, low, high): yield from (low, high)
+            case InList(_, values): yield from values
 
 
 class TestWireValidation(unittest.TestCase):
@@ -517,29 +609,78 @@ class TestClientAndMock(unittest.TestCase):
             def __init__(self, delta=None):
                 self.choices = [] if delta is None else [Choice(delta)]
 
+        class Usage:
+            prompt_tokens = 3239
+            completion_tokens = 491
+            completion_tokens_details = type("D", (), {"reasoning_tokens": 300})
+
+        class Chunk2:
+            """The trailing usage-only chunk: no choices, just the token counts."""
+            choices = []
+            usage = Usage()
+
         class FakeCompletions:
             def create(self, **kwargs):
                 seen["request"] = kwargs
                 return [Chunk(),
                         Chunk(Delta(reasoning_content="private chain of thought")),
                         Chunk(Delta(content='{"kind":')),
-                        Chunk(Delta(content='"Query"}'))]
+                        Chunk(Delta(content='"Query"}')),
+                        Chunk2()]
 
         class FakeSdk:
             chat = type("Chat", (), {"completions": FakeCompletions()})
 
-        with mock.patch.object(client, "_sdk", lambda *a: FakeSdk()):
-            response = client.chat([{"role": "user", "content": "hello"}])
+        with (mock.patch.object(client, "_sdk", lambda *a: FakeSdk()),
+              mock.patch.object(config, "TRACE", False)):
+            response = client.chat([{"role": "user", "content": "hello"}], purpose="compile")
 
         self.assertEqual(response.text, '{"kind":"Query"}')
         self.assertTrue(response.thought)
         self.assertNotIn("private chain", response.text)
         self.assertEqual(seen["request"]["model"], config.MODEL)
         self.assertIs(seen["request"]["stream"], True)
+        self.assertEqual(seen["request"]["stream_options"], {"include_usage": True})
         self.assertEqual(seen["request"]["extra_body"], {
             "chat_template_kwargs": {"enable_thinking": True},
             "reasoning_budget": client.REASONING_BUDGET,
         })
+
+    def test_a_streamed_call_reports_its_tokens_and_where_they_went(self):
+        """A streamed response carries no usage unless it is asked for, and the split
+        between thinking and answering is the number worth having."""
+        class Usage:
+            prompt_tokens = 3239
+            completion_tokens = 491
+            completion_tokens_details = type("D", (), {"reasoning_tokens": 300})
+
+        response = client.ChatResponse(
+            text="{}", model="m", purpose="compile", tokens_in=3239, tokens_out=491,
+            reasoning_tokens=300, latency_ms=4500, ttfb_ms=400, thinking_ms=2600)
+        self.assertEqual(response.answer_tokens, 191)
+        self.assertEqual(response.writing_ms, 1500)
+        self.assertAlmostEqual(response.tokens_per_s, 491 / 4.1, places=1)
+        telemetry = response.telemetry()
+        self.assertEqual(telemetry["thinking_ms"], 2600)
+        self.assertEqual(telemetry["reasoning_tokens"], 300)
+        self.assertEqual(telemetry["purpose"], "compile")
+        self.assertIn("think", response.line())
+
+    def test_reasoning_tokens_are_split_by_character_share_when_unreported(self):
+        """NVIDIA returns completion_tokens_details=None, so the split is derived from
+        how much of the stream was trace -- never from a chars-per-token constant."""
+        bare = type("U", (), {"completion_tokens_details": None, "completion_tokens": 66})()
+        tokens, estimated = client._reasoning_tokens(bare, 263, 12)
+        self.assertTrue(estimated)
+        self.assertEqual(tokens, round(66 * 263 / 275))
+        self.assertLess(tokens, 66)          # the answer always keeps some of the total
+
+        reported = type("U", (), {"completion_tokens": 66,
+                                  "completion_tokens_details": type("D", (), {"reasoning_tokens": 42})})()
+        self.assertEqual(client._reasoning_tokens(reported, 263, 12), (42, False))
+
+        no_trace = type("U", (), {"completion_tokens_details": None, "completion_tokens": 66})()
+        self.assertEqual(client._reasoning_tokens(no_trace, 0, 120), (0, False))
 
     def test_a_missing_key_is_an_operator_error(self):
         with mock.patch.object(config, "API_KEY", ""), mock.patch.object(config, "MOCK", False):

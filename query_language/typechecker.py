@@ -2,14 +2,17 @@ from .ast import (
     FieldRef, Unnest, Aggregator, AggregatorOp, Expression,
     Comparison, InList, Between, Like, Fuzzy, And, Or, Not,
     Condition, TableRef, Join, Source, Query, ComparisonOperator,
+    Date, is_iso_8601,
 )
 from .type_system import (
-    TextType, ImageType, AudioType, TimestampType,
+    TextType, ImageType, AudioType, TimestampType, DateTimeType,
     IntType, FloatType, BoolType,
     ModalType,
     ArrayType, SequenceType, OptionalType,
     FieldType, Schema,
 )
+
+ORDERED = (IntType, FloatType, TimestampType, DateTimeType)
 
 type Env = dict[str, FieldType]
 
@@ -58,14 +61,32 @@ def resolve_expression(e: Expression, env: Env) -> FieldType:
                 raise TypeCheckError(f'{op.value} requires numeric type, got {t!r}')
             return t
         case Aggregator(op, None): raise TypeCheckError(f'{op.value} requires an argument')
+        case Date():  return DateTimeType()
         case bool():  return BoolType()   # before int — bool subclasses int
         case int():   return IntType()
         case float(): return FloatType()
         case str():   return TextType()
         case _: raise TypeCheckError(f'Unknown expression: {e!r}')
 
+def as_date(value: Expression, other: FieldType) -> bool:
+    """Whether a bare ISO-8601 string standing next to a date should be read as one.
+
+    The compiler writes `date_filed >= "2020-01-01"` far more often than it writes a
+    Date node, and a query that means exactly the right thing should not fail on
+    notation. The narrowness is the point: only a real calendar date, and only when the
+    other side is already a DateTimeType, so nothing else is silently retyped.
+    """
+    return isinstance(other, DateTimeType) and is_iso_8601(value)
+
+def operand_types(left: Expression, right: Expression, env: Env) -> tuple[FieldType, FieldType]:
+    """Both sides of a comparison, with a bare ISO string next to a date read as a date."""
+    lt, rt = resolve_expression(left, env), resolve_expression(right, env)
+    if as_date(right, lt): rt = DateTimeType()
+    if as_date(left, rt):  lt = DateTimeType()
+    return lt, rt
+
 def check_comparable(op: ComparisonOperator, lt: FieldType, rt: FieldType) -> None:
-    if op not in (ComparisonOperator.EQ, ComparisonOperator.NE) and not isinstance(lt, (IntType, FloatType, TimestampType)):
+    if op not in (ComparisonOperator.EQ, ComparisonOperator.NE) and not isinstance(lt, ORDERED):
         raise TypeCheckError(f'Operator {op.value} not supported for {lt!r}')
     if type(lt) != type(rt) and not (
         isinstance(lt, (IntType, FloatType)) and isinstance(rt, (IntType, FloatType))
@@ -75,14 +96,17 @@ def check_comparable(op: ComparisonOperator, lt: FieldType, rt: FieldType) -> No
 def check_condition(c: Condition, env: Env) -> None:
     match c:
         case Fuzzy(field, _):      modal_base(resolve_expression(field, env), 'fuzzy')
-        case Comparison(op, l, r): check_comparable(op, resolve_expression(l, env), resolve_expression(r, env))
+        case Comparison(op, l, r): check_comparable(op, *operand_types(l, r, env))
         case InList(field, vals):
             ft = resolve_field_ref(field.source, field.path, env)
-            for v in vals: check_comparable(ComparisonOperator.EQ, ft, resolve_expression(v, env))
-        case Between(field, _, _):
+            for v in vals: check_comparable(ComparisonOperator.EQ, *operand_types(field, v, env))
+        case Between(field, low, high):
             ft = resolve_field_ref(field.source, field.path, env)
-            if not isinstance(ft, (IntType, FloatType, TimestampType)):
-                raise TypeCheckError(f'between requires numeric/timestamp field, got {ft!r}')
+            if not isinstance(ft, ORDERED):
+                raise TypeCheckError(f'between requires an ordered field '
+                                     f'(numeric, timestamp or date), got {ft!r}')
+            for bound in (low, high):
+                check_comparable(ComparisonOperator.LE, *operand_types(field, bound, env))
         case Like(field, _):
             if not isinstance(resolve_field_ref(field.source, field.path, env), TextType):
                 raise TypeCheckError('like requires text field')

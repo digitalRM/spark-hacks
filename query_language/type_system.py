@@ -24,6 +24,11 @@ class AudioType: pass
 class TimestampType: pass  # point/interval in a temporal sequence (e.g. audio segment)
 
 @dataclass(frozen=True)
+class DateTimeType: pass   # a calendar instant: a filing date, an issue date
+# Not the same thing as TimestampType, which is an offset *inside* a piece of media --
+# 12.5 seconds into an oral argument. Both are ordered; only one of them has a year.
+
+@dataclass(frozen=True)
 class IntType: pass
 
 @dataclass(frozen=True)
@@ -34,7 +39,8 @@ class BoolType: pass
 
 type ModalType   = TextType | ImageType | AudioType
 type NumericType = IntType | FloatType
-type ScalarType  = ModalType | TimestampType | NumericType | BoolType
+type OrderedType = NumericType | TimestampType | DateTimeType  # <, <=, >, >=, between
+type ScalarType  = ModalType | TimestampType | DateTimeType | NumericType | BoolType
 
 @dataclass(frozen=True)
 class ArrayType:    # stored, discrete collection (e.g. pages of a document)

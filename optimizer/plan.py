@@ -107,9 +107,15 @@ class ExactFilter:
     """A deterministic predicate that did not make it into the Scan. Zero model calls.
 
     Every one surviving to a final plan is a pushdown failure; it exists so the
-    pre-pushdown snapshot is honest, and so a genuinely unpushable predicate has a home."""
+    pre-pushdown snapshot is honest, and so a genuinely unpushable predicate has a home.
+
+    Carries both renderings: `predicate` is printed BQL for the node card, `sql`/`params`
+    are what pushdown splices into the Scan. Lowering produces both, because it is the
+    last place the original condition is in scope."""
     node_id: str
     predicate: str
+    sql: str
+    params: tuple[Any, ...]
     selectivity: float
     child: 'PlanNode'
 

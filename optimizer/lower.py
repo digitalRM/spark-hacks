@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from typing import Callable
 
 from query_language.ast import (
-    Aggregator, And, Between, Comparison, Condition,
+    Aggregator, And, Between, Comparison, Condition, Date,
     Expression, FieldRef, Fuzzy, InList, Join, Like, Not, Or, Query, Source, TableRef,
     Unnest, pp_condition, pp_field_ref,
 )
@@ -110,8 +110,9 @@ def _scan(s: Source, ctx: _Ctx) -> Scan:
     is not: it is the only way to express a join at all.
     """
     tables = _aliases(s)
-    sql, params = _sql(s, ctx)
-    return Scan(ctx.nid('scan'), tuple(dict.fromkeys(tables.values())), sql, tuple(params),
+    frm, params = _sql(s, ctx)
+    return Scan(ctx.nid('scan'), tuple(dict.fromkeys(tables.values())),
+                f'SELECT * FROM {frm}', tuple(params),
                 (), 1.0, SelectivitySource.STATIC, _base_grain(s))
 
 def _base_grain(s: Source) -> Grain:
@@ -141,9 +142,10 @@ def _sql_condition(c: Condition, ctx: _Ctx) -> tuple[str, list[object]]:
             rs, rp = _sql_expression(r, ctx)
             return f'{ls} {op.value} {rs}', [*lp, *rp]
         case InList(f, values):
-            return (f'{_sql_ref(f)} IN ({", ".join("?" * len(values))})', list(values))
+            return (f'{_sql_ref(f)} IN ({", ".join("?" * len(values))})',
+                    [_param(v) for v in values])
         case Between(f, lo, hi):
-            return f'{_sql_ref(f)} BETWEEN ? AND ?', [lo, hi]
+            return f'{_sql_ref(f)} BETWEEN ? AND ?', [_param(lo), _param(hi)]
         case Like(f, pattern):
             return f'{_sql_ref(f)} LIKE ?', [pattern]
         case And(children):
@@ -165,7 +167,12 @@ def _sql_expression(e: Expression, ctx: _Ctx) -> tuple[str, list[object]]:
         case FieldRef() as r: return _sql_ref(r), []
         case Unnest():        raise LoweringError('cannot unnest inside SQL')
         case Aggregator():    raise LoweringError('cannot aggregate inside a join condition')
-        case _:               return '?', [e]
+        case _:               return '?', [_param(e)]
+
+def _param(value: object) -> object:
+    """A literal as a bound SQL parameter. A Date binds as its ISO-8601 text, which is
+    what the column holds and what SQLite orders correctly."""
+    return value.value if isinstance(value, Date) else value
 
 def _sql_ref(r: FieldRef) -> str:
     return pp_field_ref(r)
@@ -205,7 +212,10 @@ def _exact(c: Condition, child: PlanNode, ctx: _Ctx, negated: bool) -> ExactFilt
     if isinstance(c, (And, Or, Not, Fuzzy)):
         raise LoweringError(f'not a leaf predicate: {c!r}')
     text = pp_condition(c)
-    return ExactFilter(ctx.nid('exact'), f'NOT ({text})' if negated else text,
+    sql, params = _sql_condition(c, ctx)
+    return ExactFilter(ctx.nid('exact'),
+                       f'NOT ({text})' if negated else text,
+                       f'NOT ({sql})' if negated else sql, tuple(params),
                        NAIVE_SELECTIVITY, child)
 
 def _fuzzy(f: Fuzzy, child: PlanNode, ctx: _Ctx, negated: bool) -> PlanNode:

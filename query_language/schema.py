@@ -5,7 +5,7 @@ never names a model or a modality; it names a FIELD. Everything the optimizer
 needs in order to turn `Fuzzy(cluster.scan_pages, "...")` into a vision call over
 47 page images lives here, in that field's spec:
 
-    type        SCALAR | TEXT | TEXT_CHUNKED | IMAGE_SET | AUDIO | DOC_SCAN
+    type        SCALAR | DATE | TEXT | TEXT_CHUNKED | IMAGE_SET | AUDIO | DOC_SCAN
     unit        what one model call actually looks at: row | page | chunk | segment
     fanout      expected units per row (47 pages per scanned record)
     quantifier  ANY (stop at the first matching unit) | ALL (stop at the first failure)
@@ -33,14 +33,14 @@ import config
 
 SCHEMA_DIR = Path(__file__).resolve().parent / "schemas"
 
-FIELD_TYPES = ("SCALAR", "TEXT", "TEXT_CHUNKED", "IMAGE_SET", "AUDIO", "DOC_SCAN")
+FIELD_TYPES = ("SCALAR", "DATE", "TEXT", "TEXT_CHUNKED", "IMAGE_SET", "AUDIO", "DOC_SCAN")
 QUANTIFIERS = ("ANY", "ALL")
 DERIVATIONS = ("RASTERIZE", "DOC_PARSE", "ASR", "CHUNK")
 
 # Which predicate each field type accepts. The rule is deliberately blunt: Cmp is
 # for SCALAR columns, Fuzzy is for everything else. One sentence, and a model can
 # follow it. TEXT accepts both so LIKE still works on a text column.
-CMP_TYPES = frozenset({"SCALAR", "TEXT"})
+CMP_TYPES = frozenset({"SCALAR", "DATE", "TEXT"})
 FUZZY_TYPES = frozenset({"TEXT", "TEXT_CHUNKED", "IMAGE_SET", "AUDIO", "DOC_SCAN"})
 
 
@@ -153,8 +153,9 @@ class Registry:
         for table, pk in self.tables.items():
             lines.append(f"TABLE {table} (key {pk})")
             for f in self.fields_of(table):
-                if f.type == "SCALAR":
-                    detail = "SCALAR — use Cmp"
+                if f.type in ("SCALAR", "DATE"):
+                    detail = ("DATE — use Cmp with a Date literal" if f.type == "DATE"
+                              else "SCALAR — use Cmp")
                 else:
                     span = (f"{f.quantifier} of ~{f.fanout:g} {f.unit}s"
                             if f.is_set_valued else "whole value")

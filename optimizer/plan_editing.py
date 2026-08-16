@@ -288,6 +288,7 @@ def node_json(n: PlanNode) -> dict[str, Any]:
                            'selectivity_source': n.selectivity_source.value}
         case ExactFilter():
             return base | {'node': 'exact_filter', 'predicate': n.predicate,
+                           'sql': n.sql, 'params': list(n.params),
                            'selectivity': n.selectivity}
         case Retrieve():
             return base | {'node': 'retrieve', 'field': ref_json(n.field), 'text': n.text,
@@ -345,7 +346,8 @@ def node_of(d: dict[str, Any]) -> PlanNode:
                         tuple(d['pushed']), d['selectivity'],
                         SelectivitySource(d['selectivity_source']), g)
         case 'exact_filter':
-            return ExactFilter(nid, d['predicate'], d['selectivity'], cs[0])
+            return ExactFilter(nid, d['predicate'], d['sql'], tuple(d['params']),
+                               d['selectivity'], cs[0])
         case 'retrieve':
             return Retrieve(nid, ref_of(d['field']), d['text'], d['top_k'],
                             d['embed_model'], d['rerank_model'], cs[0])

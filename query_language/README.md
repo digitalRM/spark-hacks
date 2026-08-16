@@ -74,7 +74,33 @@ The v2 wire format adds:
 - `FieldRef {source, path[]}` instead of `{source, column}`
 - a single expression in `Fuzzy.field`
 - `Unnest` and `Aggregator`
+- `Date {value}` for calendar dates
 - mandatory `group_by` (usually `[]`)
+
+## Dates
+
+A date column is `DATE` in the schema and `DateTimeType` to the typechecker, and it is
+compared against a `Date` literal:
+
+```json
+{"kind": "Comparison", "op": ">=",
+ "field1": {"kind": "FieldRef", "source": "cluster", "path": ["date_filed"]},
+ "field2": {"kind": "Date", "value": "2020-01-01"}}
+```
+
+The node exists because a quoted string is text and text has no order: `>=` against a
+bare `"2020-01-01"` is a comparison between two pieces of text, which is why the
+typechecker used to refuse it. `Date.value` is validated against the calendar, not a
+regex — `"2020-13-45"` is `bad_date`.
+
+A bare ISO-8601 string is still accepted *when the other side is a date column*, because
+that query means exactly the right thing and failing it on notation helps nobody. The
+coercion is deliberately that narrow: it never retypes a text column, and a non-date
+string on a date column is `bad_date_literal`, reported to the repair loop rather than
+discovered after the compile succeeds.
+
+`DateTimeType` is not `TimestampType`. A timestamp is an offset inside a piece of media
+— 12.5 seconds into an oral argument. Both are ordered; only one of them has a year.
 
 Every compile uses a validate–repair loop. Invalid JSON, AST-shape errors, bad
 aliases, unknown nested paths, illegal joins, modality mismatches, and grouping

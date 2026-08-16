@@ -16,6 +16,7 @@ Cost: one HTTP round trip per call.
 from __future__ import annotations
 
 import json
+import sys
 import time
 from dataclasses import dataclass
 
@@ -39,14 +40,78 @@ class ModelError(RuntimeError):
 
 @dataclass
 class ChatResponse:
+    """One model call, and what it cost.
+
+    A reasoning model spends most of a slow call before it emits its first visible
+    character, so the useful split is not "how long did it take" but where the time and
+    the tokens went: waiting, thinking, then writing.
+    """
     text: str
     model: str
+    purpose: str = ""            # route | compile | repair | answer -- which call this was
     tokens_in: int = 0
-    tokens_out: int = 0
-    latency_ms: float = 0.0
+    tokens_out: int = 0          # everything generated, reasoning included
+    reasoning_tokens: int = 0    # the part of tokens_out that was thinking
+    reasoning_estimated: bool = False  # ...derived from character share, not reported
+    reasoning_chars: int = 0     # the trace is measured, never kept or printed
+    latency_ms: float = 0.0      # the whole call
+    ttfb_ms: float = 0.0         # request to first chunk: queue + prefill
+    thinking_ms: float = 0.0     # first chunk to first content token: the trace
     mock: bool = False
     dropped_shots: int = 0  # few-shots sacrificed to fit the context window
     thought: bool = False   # the model reasoned anyway: the switch did not take
+
+    @property
+    def writing_ms(self) -> float:
+        """From the first content token to the end: emitting the answer itself."""
+        return max(0.0, self.latency_ms - self.ttfb_ms - self.thinking_ms)
+
+    @property
+    def answer_tokens(self) -> int:
+        return max(0, self.tokens_out - self.reasoning_tokens)
+
+    @property
+    def tokens_per_s(self) -> float:
+        seconds = (self.thinking_ms + self.writing_ms) / 1000
+        return self.tokens_out / seconds if seconds > 0 else 0.0
+
+    def line(self) -> str:
+        """One line, dense enough to read a slow call off the server log.
+
+        A `~` on the thinking token count means it was split out by character share
+        rather than reported by the endpoint — see `_reasoning_tokens`.
+        """
+        about = '~' if self.reasoning_estimated else ''
+        return (f"{self.purpose or 'chat':<8} {self.model.rsplit('/', 1)[-1]:<28} "
+                f"{self.latency_ms / 1000:6.2f}s = wait {self.ttfb_ms / 1000:5.2f}s "
+                f"+ think {self.thinking_ms / 1000:6.2f}s + write {self.writing_ms / 1000:5.2f}s"
+                f"   in {self.tokens_in:>6,}  out {self.tokens_out:>5,} "
+                f"({about}{self.reasoning_tokens:,} thinking, {about}{self.answer_tokens:,} answer)"
+                f"  {self.tokens_per_s:5.1f} tok/s")
+
+    def telemetry(self) -> dict[str, float | int | str | bool]:
+        """The same numbers, for the stage report and the wire."""
+        return {"purpose": self.purpose, "model": self.model,
+                "ms": round(self.latency_ms, 1), "ttfb_ms": round(self.ttfb_ms, 1),
+                "thinking_ms": round(self.thinking_ms, 1),
+                "writing_ms": round(self.writing_ms, 1),
+                "tokens_in": self.tokens_in, "tokens_out": self.tokens_out,
+                "reasoning_tokens": self.reasoning_tokens,
+                "reasoning_estimated": self.reasoning_estimated,
+                "answer_tokens": self.answer_tokens,
+                "tokens_per_s": round(self.tokens_per_s, 1),
+                "thought": self.thought, "dropped_shots": self.dropped_shots}
+
+
+def trace(response: ChatResponse) -> None:
+    """Print one call's cost to stderr as it happens.
+
+    On by default: every model call is seconds of wall clock the user is waiting
+    through, and a server log that does not say where they went is not a log. Set
+    AMICUS_TRACE=0 to silence it.
+    """
+    if config.TRACE:
+        print(f"[amicus] {response.line()}", file=sys.stderr, flush=True)
 
 
 def is_mock() -> bool:
@@ -121,20 +186,22 @@ def fit_context(messages: list[dict[str, str]], max_tokens: int,
 # --------------------------------------------------------------------------- #
 # The call
 # --------------------------------------------------------------------------- #
-def chat(messages: list[dict[str, str]], *, model: str | None = None,
+def chat(messages: list[dict[str, str]], *, model: str | None = None, purpose: str = "",
          temperature: float = TEMPERATURE, max_tokens: int = MAX_TOKENS,
          enable_thinking: bool = ENABLE_THINKING, timeout_s: float = TIMEOUT_S,
          max_retries: int = MAX_RETRIES) -> ChatResponse:
-    """Send one chat completion and return the assistant's text.
+    """Send one chat completion and return the assistant's text, with its cost measured.
 
-    Nemotron may emit private reasoning deltas before its answer. We record only that
-    reasoning occurred and never concatenate or print it.
+    Nemotron may emit private reasoning deltas before its answer. We time and count that
+    trace but never concatenate, keep or print it: `purpose` says which call this was,
+    and the returned ChatResponse says where its seconds and tokens went.
 
     Cost: one round trip, or free under AMICUS_MOCK=1.
     """
     model = model or config.MODEL
     if is_mock():
-        return ChatResponse(text=_mock_reply(messages), model=f"mock:{model}", mock=True)
+        return ChatResponse(text=_mock_reply(messages), model=f"mock:{model}",
+                            purpose=purpose, mock=True)
 
     messages, dropped = fit_context(messages, max_tokens)
     try:
@@ -151,23 +218,43 @@ def chat(messages: list[dict[str, str]], *, model: str | None = None,
                 "reasoning_budget": REASONING_BUDGET,
             },
             stream=True,
+            # Ask for the trailing usage chunk. Without it a streamed response carries no
+            # token counts at all, which is why tokens_in/tokens_out used to read 0.
+            stream_options={"include_usage": True},
         )
         content: list[str] = []
-        thought = False
+        reasoning_chars = 0
+        usage = None
+        ttfb = thinking = 0.0
         for chunk in stream:
+            if not ttfb:
+                ttfb = (time.perf_counter() - t0) * 1000
+            usage = getattr(chunk, "usage", None) or usage
             choices = getattr(chunk, "choices", None)
             if not choices:
                 continue
             delta = choices[0].delta
-            thought = thought or bool(getattr(delta, "reasoning_content", None))
+            reasoning_chars += len(getattr(delta, "reasoning_content", None) or "")
             text = getattr(delta, "content", None)
             if text is not None:
+                if not content:
+                    # First visible character. Everything since the first chunk was the
+                    # model thinking.
+                    thinking = (time.perf_counter() - t0) * 1000 - ttfb
                 content.append(text)
-        result = ChatResponse(text="".join(content).strip(), model=model,
-                            latency_ms=(time.perf_counter() - t0) * 1000,
-                            dropped_shots=dropped, thought=thought)
-        print(f"latency_ms = {(time.perf_counter() - t0) * 1000}")
-        return result
+        text_out = "".join(content).strip()
+        reasoning_tokens, estimated = _reasoning_tokens(usage, reasoning_chars, len(text_out))
+        response = ChatResponse(
+            text=text_out, model=model, purpose=purpose,
+            tokens_in=_usage_tokens(usage, "prompt_tokens"),
+            tokens_out=_usage_tokens(usage, "completion_tokens"),
+            reasoning_tokens=reasoning_tokens, reasoning_estimated=estimated,
+            reasoning_chars=reasoning_chars,
+            latency_ms=(time.perf_counter() - t0) * 1000,
+            ttfb_ms=ttfb, thinking_ms=thinking,
+            dropped_shots=dropped, thought=reasoning_chars > 0)
+        trace(response)
+        return response
     except ModelError:
         raise
     except Exception as exc:
@@ -177,6 +264,37 @@ def chat(messages: list[dict[str, str]], *, model: str | None = None,
         raise ModelError(
             f"{model} failed at {config.BASE_URL}{detail}: {type(exc).__name__}"
         ) from exc
+
+
+def _usage_tokens(usage, field: str) -> int:
+    return int(getattr(usage, field, 0) or 0)
+
+
+def _reasoning_tokens(usage, reasoning_chars: int, content_chars: int) -> tuple[int, bool]:
+    """How much of the output was thinking. Returns (tokens, estimated?).
+
+    NVIDIA's endpoint returns `completion_tokens_details: None` — it counts reasoning in
+    `completion_tokens` and never breaks it out — so this is normally derived: split the
+    reported completion tokens by the character share of the two streams.
+
+    That deliberately avoids a chars-per-token constant. `estimate_tokens` uses 2.5,
+    measured on prompts, and applying it here overstated reasoning by half again
+    (263 chars of trace scored 105 tokens against a reported 66 for the whole
+    completion). A ratio only assumes the trace and the answer tokenize at roughly the
+    same rate, which is far weaker — JSON is denser than prose, so what is left is a
+    mild over-attribution to reasoning, and it is reported as an estimate.
+    """
+    reported = getattr(getattr(usage, "completion_tokens_details", None),
+                       "reasoning_tokens", None)
+    if reported is not None:
+        return int(reported), False
+    total_chars = reasoning_chars + content_chars
+    completion = _usage_tokens(usage, "completion_tokens")
+    if not reasoning_chars:
+        return 0, False                       # nothing was streamed as reasoning
+    if not completion or not total_chars:
+        return int(reasoning_chars / 2.5), True   # no usage at all: fall back to chars
+    return round(completion * reasoning_chars / total_chars), True
 
 
 def list_models() -> list[str]:

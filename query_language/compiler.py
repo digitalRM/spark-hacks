@@ -33,7 +33,7 @@ import config
 
 from . import checks, client, schema, serde
 from .ast import (Aggregator, AggregatorOp, And, Between, Comparison,
-                  ComparisonOperator as Op, FieldRef, Fuzzy, InList, Join, Like,
+                  ComparisonOperator as Op, Date, FieldRef, Fuzzy, InList, Join, Like,
                   Not, Or, Query, TableRef, Unnest)
 from .serde import BQL_VERSION, DecodeError
 
@@ -104,14 +104,16 @@ Every node is a JSON object with a "kind". These are all of them:
   InList      {"kind":"InList", "field":<FieldRef>, "values":[<literal>,...]}
   Between     {"kind":"Between", "field":<FieldRef>, "low":<literal>, "high":<literal>}
   Like        {"kind":"Like", "field":<FieldRef>, "pattern":"%text%"}
+  Date        {"kind":"Date", "value":"YYYY-MM-DD"}   a calendar date, and the ONLY
+              way to write one. "2020-01-01" on its own is text, and text has no order.
   Fuzzy       {"kind":"Fuzzy", "field":<FieldRef>|<Unnest>, "text":"<condition>"}
   And / Or    {"kind":"And", "children":[<condition>,...]}
   Not         {"kind":"Not", "child":<condition>}
 
-<expr>      FieldRef, Unnest, Aggregator, or a bare JSON literal.
+<expr>      FieldRef, Unnest, Aggregator, Date, or a bare JSON literal.
 <source>    a TableRef or Join object. Joins nest to the left.
 <condition> Comparison, InList, Between, Like, Fuzzy, And, Or or Not.
-<literal>   a JSON string, number or boolean. Dates are strings, "YYYY-MM-DD".
+<literal>   a JSON string, number or boolean, or a Date object.
 """
 
 RULES = """\
@@ -126,9 +128,11 @@ RULES. Breaking one gets your output rejected and sent back to you.
     the physical table name. Use Unnest only for a list/sequence field.
  5. Every table you use must appear in "source", joined along a listed JOIN EDGE. Nest Join
     objects to reach a third or fourth table.
- 6. A comparison goes on SCALAR columns only. Fuzzy goes on everything that is not SCALAR.
+ 6. A comparison goes on SCALAR and DATE columns only. Fuzzy goes on everything else.
     Never the other way round.
  7. Comparison operators are exactly: {ops}.
+ 7b. A DATE column is compared against a Date object, never a bare string, in Comparison,
+    Between and InList alike. Ordering (<, <=, >, >=) works on numbers and dates only.
  8. Keep Fuzzy text short, declarative and self-contained. It is judged one page, one
     segment or one opinion at a time, with no other context.
  8b. Fuzzy has ONE field expression. For independent semantic requirements, write one
@@ -185,7 +189,7 @@ FEW_SHOTS: list[tuple[str, Query]] = [
            where=And((
                InList(_f("docket", "court_id"), ("ca9", "ca10")),
                _eq(_f("cluster", "precedential_status"), "Published"),
-               Comparison(Op.GE, _f("cluster", "date_filed"), "2020-01-01"),
+               Comparison(Op.GE, _f("cluster", "date_filed"), Date("2020-01-01")),
                Fuzzy(_f("opinion", "plain_text"), "excessive force by police officers"))),
            group_by=(),
            limit=10)),
@@ -209,7 +213,7 @@ FEW_SHOTS: list[tuple[str, Query]] = [
      Query(select=(_f("docket", "id"), _f("docket", "case_name")), source=_t("docket"),
            where=And((
                _eq(_f("docket", "court_id"), "ca2"),
-               Between(_f("docket", "date_filed"), "2023-01-01", "2023-12-31"),
+               Between(_f("docket", "date_filed"), Date("2023-01-01"), Date("2023-12-31")),
                Fuzzy(_f("docket", "argument"), "counsel conceded a point under questioning"))),
            group_by=(),
            limit=10)),
@@ -344,7 +348,8 @@ def repair_prompt(errors: list[DecodeError], attempt: int) -> str:
         f"{hint}\n\n"
         "Return the corrected JSON object, complete, from scratch. Fix exactly these problems "
         "and change nothing else. Remember: no Visual/Audio/Sem/Sim nodes; comparisons on "
-        "SCALAR columns only and Fuzzy on everything else; Fuzzy.field is one FieldRef or "
+        "SCALAR columns only and Fuzzy on everything else; a DATE column takes a Date object, "
+        "not a bare string; Fuzzy.field is one FieldRef or "
         "Unnest expression; every FieldRef uses a source alias and path list from the schema. "
         "Output the JSON object only, "
         "with nothing after the closing brace."
@@ -472,18 +477,16 @@ def compile_question(question: str, *, registry: schema.Registry | None = None,
     errors: list[DecodeError] = []
 
     for attempt in range(1, max_attempts + 1):
-        resp = client.chat(messages, model=mdl, temperature=TEMPERATURE)
+        resp = client.chat(messages, model=mdl, temperature=TEMPERATURE,
+                           purpose='compile' if attempt == 1 else f'repair {attempt - 1}')
         obj, parse_error = extract_json(resp.text)
         if parse_error is not None:
             ast, errors = None, [DecodeError("$", "invalid_json", parse_error)]
         else:
             ast, errors = check_payload(obj, reg)
 
-        attempts.append({"attempt": attempt, "model": resp.model, "ok": not errors,
-                         "errors": list(errors), "tokens_in": resp.tokens_in,
-                         "tokens_out": resp.tokens_out, "latency_ms": round(resp.latency_ms, 1),
-                         "dropped_shots": resp.dropped_shots,
-                         "raw": resp.text[:2000]})
+        attempts.append({"attempt": attempt, "ok": not errors, "errors": list(errors),
+                         **resp.telemetry(), "raw": resp.text[:2000]})
 
         if not errors and ast is not None:
             result = CompileResult(ok=True, question=question, query=serde.encode(ast), ast=ast,

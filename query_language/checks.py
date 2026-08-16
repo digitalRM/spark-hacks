@@ -18,6 +18,7 @@ from .ast import (
     Between,
     Comparison,
     ComparisonOperator,
+    Date,
     FieldRef,
     Fuzzy,
     InList,
@@ -28,6 +29,7 @@ from .ast import (
     Query,
     TableRef,
     Unnest,
+    is_iso_8601,
 )
 from .serde import DecodeError, table_refs
 
@@ -198,9 +200,10 @@ def _condition(condition: Any, path: str, aliases: dict[str, str], registry: Any
                     f"{spec.name} is not modal content; use a comparison instead",
                 ))
         case Comparison(_, left, right):
+            specs = {}
             for key, operand in (("field1", left), ("field2", right)):
                 if isinstance(operand, FieldRef):
-                    _exact_field(operand, f"{path}.{key}", aliases, registry, errors)
+                    specs[key] = _exact_field(operand, f"{path}.{key}", aliases, registry, errors)
                 elif isinstance(operand, (Unnest, Aggregator)):
                     errors.append(DecodeError(
                         f"{path}.{key}", "bad_comparison_expression",
@@ -209,17 +212,53 @@ def _condition(condition: Any, path: str, aliases: dict[str, str], registry: Any
                     _expression(operand, f"{path}.{key}", aliases, registry, errors)
                 else:
                     _suspect_literal(operand, f"{path}.{key}", registry, errors)
-        case InList(field, _) | Between(field, _, _) | Like(field, _):
+            _dates(specs.get("field1"), right, f"{path}.field2", errors)
+            _dates(specs.get("field2"), left, f"{path}.field1", errors)
+        case InList(field, values):
+            spec = _exact_field(field, f"{path}.field", aliases, registry, errors)
+            for i, value in enumerate(values):
+                _dates(spec, value, f"{path}.values[{i}]", errors)
+        case Between(field, low, high):
+            spec = _exact_field(field, f"{path}.field", aliases, registry, errors)
+            _dates(spec, low, f"{path}.low", errors)
+            _dates(spec, high, f"{path}.high", errors)
+        case Like(field, _):
             _exact_field(field, f"{path}.field", aliases, registry, errors)
 
 
 def _exact_field(ref: FieldRef, path: str, aliases: dict[str, str], registry: Any,
-                 errors: list[DecodeError]) -> None:
+                 errors: list[DecodeError]) -> Any:
     spec = _field(ref, path, aliases, registry, errors)
     if spec is not None and not spec.accepts("Cmp"):
         errors.append(DecodeError(
             path, "exact_on_modal_field",
             f"{spec.name} is {spec.type} content a model must interpret; use Fuzzy instead",
+        ))
+    return spec
+
+
+def _dates(spec: Any, operand: Any, path: str, errors: list[DecodeError]) -> None:
+    """Check a literal against a DATE column, and a Date literal against its column.
+
+    Caught here rather than in the typechecker because this is the list the repair loop
+    is handed: a date mistake the model can be told about in the next turn costs one
+    round trip, and the same mistake found after the compile "succeeds" costs the query.
+    """
+    if isinstance(operand, (FieldRef, Unnest, Aggregator)) or spec is None:
+        return
+    if spec.type == "DATE":
+        if isinstance(operand, Date) or is_iso_8601(operand):
+            return
+        errors.append(DecodeError(
+            path, "bad_date_literal",
+            f"{spec.name} is a DATE column; compare it against "
+            f'{{"kind":"Date","value":"YYYY-MM-DD"}}, not {operand!r}',
+        ))
+    elif isinstance(operand, Date):
+        errors.append(DecodeError(
+            path, "date_on_non_date_field",
+            f"{spec.name} is {spec.type}, not a date; a Date literal cannot be compared "
+            f"against it",
         ))
 
 

@@ -53,6 +53,21 @@ nothing about the later stages, and it must not start failing the day the execut
 lands and errors on a hard query — a typecheck, optimize or execute failure is
 reported on its own stage, not on `ok`.
 
+## Where the seconds went
+
+Every model call is measured and reported three ways, because a question that takes
+half a minute should never be a mystery:
+
+- one stderr line per call as it happens (`AMICUS_TRACE=0` silences it),
+- `stages[].detail.calls[]` — per call: `ttfb_ms` (queue + prefill), `thinking_ms`
+  (the reasoning trace), `writing_ms`, tokens in/out, and how many of the output
+  tokens were reasoning,
+- `cost` on the envelope — the same totals for the whole question, plus
+  `pipeline_ms` so model time can be compared against everything Amicus itself did.
+
+The endpoint reports no reasoning-token count of its own, so that split is derived
+from the character share of the two streams and flagged `reasoning_estimated`.
+
 `stages` reports every stage in order with `status` in `ok | failed | stub | skipped`.
 `stub` means the module behind it is not written yet (today: `runtime/executor.py`);
 `skipped` means an earlier stage made it meaningless.

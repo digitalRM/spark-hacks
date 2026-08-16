@@ -231,7 +231,10 @@ def _scan(node: Scan, ctx: _Ctx) -> list[Row]:
     return rows
 
 
-_EXACT_RE = re.compile(r'EXACT\((?P<lhs>[\w.]+)\s*(?P<op>=|>=|<=|>|<)\s*"(?P<rhs>[^"]*)"\)')
+# `date "2020-01-01"` is how the pretty-printer renders a Date literal, and the quoted
+# ISO-8601 text after it compares correctly as a string, so the tag is matched and dropped.
+_EXACT_RE = re.compile(
+    r'EXACT\((?P<lhs>[\w.]+)\s*(?P<op>=|>=|<=|>|<)\s*(?:date\s+)?"(?P<rhs>[^"]*)"\)')
 
 
 def _exact_filter(node: ExactFilter, rows: list[Row], ctx: _Ctx) -> list[Row]:

@@ -116,7 +116,10 @@
               "date_filed"
             ]
           },
-          "field2": "2020-01-01"
+          "field2": {
+            "kind": "Date",
+            "value": "2020-01-01"
+          }
         },
         {
           "kind": "Fuzzy",
@@ -134,5 +137,5 @@
     "group_by": [],
     "limit": 10
   },
-  "printed": "select cluster.id, cluster.case_name\nfrom ((cluster as cluster join docket as docket on cluster.docket_id = docket.id) join opinion as opinion on opinion.cluster_id = cluster.id)\nwhere (docket.court_id in (\"ca9\", \"ca10\") and cluster.precedential_status = \"Published\" and cluster.date_filed >= \"2020-01-01\" and fuzzy(opinion.plain_text, \"excessive force by police officers\"))\nlimit 10"
+  "printed": "select cluster.id, cluster.case_name\nfrom ((cluster as cluster join docket as docket on cluster.docket_id = docket.id) join opinion as opinion on opinion.cluster_id = cluster.id)\nwhere (docket.court_id in (\"ca9\", \"ca10\") and cluster.precedential_status = \"Published\" and cluster.date_filed >= date \"2020-01-01\" and fuzzy(opinion.plain_text, \"excessive force by police officers\"))\nlimit 10"
 }

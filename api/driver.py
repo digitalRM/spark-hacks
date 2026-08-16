@@ -19,14 +19,6 @@ direct legal answer -- and nothing about the later stages. That is the contract 
 frontend depends on, and it must not start failing the day the executor lands and errors
 on a hard query.
 
-One known gap, deliberately left visible rather than papered over: the registry types every
-non-modal column as the single string SCALAR, so an ISO date arrives as text, while
-`check_comparable` allows <, <=, >, >= on numeric and timestamp only. A query carrying
-`date_filed >= "2020-01-01"` compiles and then fails typecheck. The one-line fix is to let
-ordering comparisons through on TextType -- lexicographic order is correct for ISO-8601 and
-is exactly what SQLite does on a TEXT date column -- but that is a semantics decision in
-`query_language/typechecker.py`, so it is reported, not taken.
-
 Cost: one routing call, then one compiler round trip on a cache miss, or one direct
 answer. Pure computation from there until the executor lands.
 """
@@ -100,6 +92,7 @@ def relevance_stage(question: str) -> tuple[Stage, relevance.RelevanceResult]:
                       detail={'route': 'compile', 'failed_open': True}),
                 relevance.RelevanceResult('compile', 'unavailable'))
     detail = {'route': decision.route, 'model': decision.model}
+    if decision.call is not None: detail['calls'] = [decision.call.telemetry()]
     if decision.route == 'reject':
         return Stage('relevance', 'failed', since(t0), relevance.REJECTION_MESSAGE,
                      detail=detail), decision
@@ -116,16 +109,18 @@ def answer_stage(question: str) -> tuple[Stage, str, str]:
         response = legal_answer.answer_question(question)
     except client.ModelError as e:
         return Stage('answer', 'failed', since(t0), f'model unavailable: {e}'), '', ''
-    return (Stage('answer', 'ok', since(t0), detail={'model': response.model}),
+    return (Stage('answer', 'ok', since(t0),
+                  detail={'model': response.model, 'calls': [response.telemetry()]}),
             response.text.strip(), response.model)
 
 def compile_stage(question: str, reg: Registry, *, use_cache: bool,
                   max_attempts: int) -> tuple[Stage, CompileResult]:
     """Natural language to a validated BQL AST, via the compiler's validate-repair loop.
 
-    Carries the loop's telemetry onto the stage -- model, attempt count, cache hit.
-    That telemetry is the evidence a compiler ran rather than a prompt, and it should be
-    visible in the UI.
+    Carries the loop's telemetry onto the stage -- model, attempt count, cache hit, and
+    one entry per round trip. That telemetry is the evidence a compiler ran rather than a
+    prompt, and with a repair loop "compile took 30s" is never the interesting number:
+    how many round trips, and how much of each was the model thinking, is.
     """
     t0 = perf_counter()
     try:
@@ -137,7 +132,10 @@ def compile_stage(question: str, reg: Registry, *, use_cache: bool,
         return Stage('compile', 'failed', since(t0), f'model unavailable: {e}',
                      tuple(failed.errors)), failed
 
-    detail = {'model': result.model, 'attempts': len(result.attempts), 'cached': result.cached}
+    detail = {'model': result.model, 'attempts': len(result.attempts),
+              'cached': result.cached,
+              'calls': [{k: v for k, v in a.items() if k not in ('raw', 'errors')}
+                        for a in result.attempts]}
     if result.warnings: detail['warnings'] = list(result.warnings)
     if not result.ok:
         return Stage('compile', 'failed', since(t0), result.message(),
@@ -187,6 +185,30 @@ def execute_stage(plan: dict[str, Any]) -> tuple[Stage, dict[str, Any] | None]:
 # --------------------------------------------------------------------------- #
 # The pipeline
 # --------------------------------------------------------------------------- #
+def calls(stages: list[Stage]) -> list[dict[str, Any]]:
+    """Every model call the pipeline made, in order, whichever stage made it."""
+    return [c for s in stages for c in s.detail.get('calls', ())]
+
+def cost(stages: list[Stage]) -> dict[str, Any]:
+    """What the whole question cost: wall clock, model time, and where the tokens went.
+
+    `pipeline_ms` minus `model_ms` is everything Amicus itself did -- decoding,
+    validating, typechecking, planning. It is normally under a millisecond, and the
+    point of reporting it next to the model time is that this stays true.
+    """
+    made = calls(stages)
+    total = lambda field: sum(c.get(field, 0) for c in made)  # noqa: E731
+    return {'calls': len(made),
+            'pipeline_ms': round(sum(s.ms for s in stages), 1),
+            'model_ms': round(total('ms'), 1),
+            'waiting_ms': round(total('ttfb_ms'), 1),
+            'thinking_ms': round(total('thinking_ms'), 1),
+            'writing_ms': round(total('writing_ms'), 1),
+            'tokens_in': total('tokens_in'),
+            'tokens_out': total('tokens_out'),
+            'reasoning_tokens': total('reasoning_tokens'),
+            'answer_tokens': total('answer_tokens')}
+
 def envelope(question: str, reg: Registry, mode: Mode, stages: list[Stage], *,
              ok: bool, result: CompileResult | None = None, answer: str | None = None,
              model: str = '', plan: dict[str, Any] | None = None,
@@ -207,6 +229,7 @@ def envelope(question: str, reg: Registry, mode: Mode, stages: list[Stage], *,
         'plan': plan,
         'results': results,
     }
+    out['cost'] = cost(stages)
     if answer is not None: out['answer'] = answer
     if result and result.warnings: out['warnings'] = list(result.warnings)
     errors = [e for s in stages for e in s.errors]

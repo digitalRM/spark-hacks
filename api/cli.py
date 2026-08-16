@@ -71,6 +71,7 @@ def _compile(a, reg) -> int:
     for stage in out['stages']:
         print(f"  {stage['name']:<10} {stage['status']:<8} {stage['ms']:>8.1f} ms"
               f"  {stage.get('message', '')}".rstrip())
+    _print_cost(out)
     print()
     if not out['ok']:
         # A relevance rejection carries a message and no structured errors, so lead with
@@ -89,6 +90,34 @@ def _compile(a, reg) -> int:
         print(f'NOTE  {w}\n', file=sys.stderr)
     print(json.dumps(out['query'], indent=2))
     return 0
+
+def _print_cost(out) -> None:
+    """Every model call the question made, and what each one spent it on.
+
+    Reading order: `wait` is queue and prefill before the first byte, `think` is the
+    reasoning trace, `write` is the answer being emitted. A slow question is nearly
+    always a big `think` or a second and third row. A `~` means the thinking/answer
+    token split was derived from character share, because the endpoint does not report
+    reasoning tokens.
+    """
+    cost = out.get('cost') or {}
+    calls = [c for s in out['stages'] for c in (s.get('detail') or {}).get('calls', ())]
+    if not calls:
+        return
+    print()
+    print(f"  {'call':<10} {'seconds':>22}  {'tokens':>28}   rate")
+    for c in calls:
+        about = '~' if c.get('reasoning_estimated') else ''
+        print(f"  {c['purpose']:<10} {c['ms'] / 1000:6.2f} = "
+              f"{c['ttfb_ms'] / 1000:5.2f}w {c['thinking_ms'] / 1000:6.2f}t "
+              f"{c['writing_ms'] / 1000:5.2f}e  "
+              f"in {c['tokens_in']:>6,}  out {c['tokens_out']:>5,} "
+              f"({about}{c['reasoning_tokens']:,} thinking)  {c['tokens_per_s']:5.1f}/s")
+    print(f"  {'total':<10} {cost.get('model_ms', 0) / 1000:6.2f}s in "
+          f"{cost.get('calls', 0)} call(s); thinking "
+          f"{cost.get('thinking_ms', 0) / 1000:.2f}s and "
+          f"{cost.get('reasoning_tokens', 0):,} of {cost.get('tokens_out', 0):,} "
+          f"output tokens")
 
 def _check(path: str, reg) -> int:
     raw = json.loads(Path(path).read_text())

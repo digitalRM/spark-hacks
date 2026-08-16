@@ -77,6 +77,10 @@ class RelevanceResult:
     route: Route
     model: str
     latency_ms: float = 0.0
+    # The call that produced this, when a model made it. Carried rather than copied
+    # field by field, so the driver can report the router's cost the same way it
+    # reports every other call's.
+    call: client.ChatResponse | None = None
 
     @property
     def is_legal(self) -> bool:
@@ -107,13 +111,15 @@ def classify(question: str) -> RelevanceResult:
         [{"role": "system", "content": SYSTEM_PROMPT},
          {"role": "user", "content": question}],
         model=config.ROUTER_MODEL,
+        purpose="route",
         temperature=0.0,
         max_tokens=MAX_TOKENS,
         enable_thinking=False,
         timeout_s=TIMEOUT_S,
         max_retries=MAX_RETRIES,
     )
-    return RelevanceResult(decode(response.text), response.model, response.latency_ms)
+    return RelevanceResult(decode(response.text), response.model, response.latency_ms,
+                           call=response)
 
 
 # Legal-sounding words, and the openers that ask for prose rather than records. Used

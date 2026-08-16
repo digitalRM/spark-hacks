@@ -2,6 +2,7 @@ import {
   fieldKey,
   fieldRefFor,
   isAggregator,
+  isDateLiteral,
   isFieldRef,
   isUnnest,
   sourceTables,
@@ -213,6 +214,9 @@ function formatDate(iso: string) {
 }
 
 export function humanizeValue(key: string, value: Literal): string {
+  // A Date node carries ISO-8601 text; render it the same way a bare ISO string renders,
+  // so "since Jan 1, 2020" reads identically whichever form the compiler emitted.
+  if (isDateLiteral(value)) return formatDate(value.value);
   if (typeof value === "boolean") return value ? "yes" : "no";
   if (typeof value === "number") return String(value);
   const leaf = lastSegment(key);

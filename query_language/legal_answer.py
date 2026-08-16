@@ -34,6 +34,7 @@ def answer_question(question: str) -> client.ChatResponse:
         [{"role": "system", "content": SYSTEM_PROMPT},
          {"role": "user", "content": question}],
         model=config.MODEL,
+        purpose="answer",
         temperature=TEMPERATURE,
         max_tokens=MAX_TOKENS,
         enable_thinking=True,

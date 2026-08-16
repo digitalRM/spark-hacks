@@ -86,21 +86,21 @@
                                                 "children": [
                                                   {
                                                     "node_id": "n0c",
-                                                    "label": "EXACT(EXACT(citation.cited_cite = \"490 U.S. 386\"))",
+                                                    "label": "EXACT(citation.cited_cite = \"490 U.S. 386\")",
                                                     "grain": [
                                                       "cluster"
                                                     ],
                                                     "children": [
                                                       {
                                                         "node_id": "n0b",
-                                                        "label": "EXACT(EXACT(cluster.date_filed >= \"2022-01-01\"))",
+                                                        "label": "EXACT(cluster.date_filed >= date \"2022-01-01\")",
                                                         "grain": [
                                                           "cluster"
                                                         ],
                                                         "children": [
                                                           {
                                                             "node_id": "n0a",
-                                                            "label": "EXACT(EXACT(docket.court_id = \"ca9\"))",
+                                                            "label": "EXACT(docket.court_id = \"ca9\")",
                                                             "grain": [
                                                               "cluster"
                                                             ],
@@ -127,17 +127,29 @@
                                                               }
                                                             ],
                                                             "node": "exact_filter",
-                                                            "predicate": "EXACT(docket.court_id = \"ca9\")",
+                                                            "predicate": "docket.court_id = \"ca9\"",
+                                                            "sql": "docket.court_id = ?",
+                                                            "params": [
+                                                              "ca9"
+                                                            ],
                                                             "selectivity": 0.11
                                                           }
                                                         ],
                                                         "node": "exact_filter",
-                                                        "predicate": "EXACT(cluster.date_filed >= \"2022-01-01\")",
+                                                        "predicate": "cluster.date_filed >= date \"2022-01-01\"",
+                                                        "sql": "cluster.date_filed >= ?",
+                                                        "params": [
+                                                          "2022-01-01"
+                                                        ],
                                                         "selectivity": 0.34
                                                       }
                                                     ],
                                                     "node": "exact_filter",
-                                                    "predicate": "EXACT(citation.cited_cite = \"490 U.S. 386\")",
+                                                    "predicate": "citation.cited_cite = \"490 U.S. 386\"",
+                                                    "sql": "citation.cited_cite = ?",
+                                                    "params": [
+                                                      "490 U.S. 386"
+                                                    ],
                                                     "selectivity": 0.22
                                                   }
                                                 ],
@@ -552,21 +564,21 @@
                                                 "children": [
                                                   {
                                                     "node_id": "n0c",
-                                                    "label": "EXACT(EXACT(citation.cited_cite = \"490 U.S. 386\"))",
+                                                    "label": "EXACT(citation.cited_cite = \"490 U.S. 386\")",
                                                     "grain": [
                                                       "cluster"
                                                     ],
                                                     "children": [
                                                       {
                                                         "node_id": "n0b",
-                                                        "label": "EXACT(EXACT(cluster.date_filed >= \"2022-01-01\"))",
+                                                        "label": "EXACT(cluster.date_filed >= date \"2022-01-01\")",
                                                         "grain": [
                                                           "cluster"
                                                         ],
                                                         "children": [
                                                           {
                                                             "node_id": "n0a",
-                                                            "label": "EXACT(EXACT(docket.court_id = \"ca9\"))",
+                                                            "label": "EXACT(docket.court_id = \"ca9\")",
                                                             "grain": [
                                                               "cluster"
                                                             ],
@@ -593,17 +605,29 @@
                                                               }
                                                             ],
                                                             "node": "exact_filter",
-                                                            "predicate": "EXACT(docket.court_id = \"ca9\")",
+                                                            "predicate": "docket.court_id = \"ca9\"",
+                                                            "sql": "docket.court_id = ?",
+                                                            "params": [
+                                                              "ca9"
+                                                            ],
                                                             "selectivity": 0.11
                                                           }
                                                         ],
                                                         "node": "exact_filter",
-                                                        "predicate": "EXACT(cluster.date_filed >= \"2022-01-01\")",
+                                                        "predicate": "cluster.date_filed >= date \"2022-01-01\"",
+                                                        "sql": "cluster.date_filed >= ?",
+                                                        "params": [
+                                                          "2022-01-01"
+                                                        ],
                                                         "selectivity": 0.34
                                                       }
                                                     ],
                                                     "node": "exact_filter",
-                                                    "predicate": "EXACT(citation.cited_cite = \"490 U.S. 386\")",
+                                                    "predicate": "citation.cited_cite = \"490 U.S. 386\"",
+                                                    "sql": "citation.cited_cite = ?",
+                                                    "params": [
+                                                      "490 U.S. 386"
+                                                    ],
                                                     "selectivity": 0.22
                                                   }
                                                 ],
@@ -1018,21 +1042,21 @@
                                                 "children": [
                                                   {
                                                     "node_id": "n0c",
-                                                    "label": "EXACT(EXACT(citation.cited_cite = \"490 U.S. 386\"))",
+                                                    "label": "EXACT(citation.cited_cite = \"490 U.S. 386\")",
                                                     "grain": [
                                                       "cluster"
                                                     ],
                                                     "children": [
                                                       {
                                                         "node_id": "n0b",
-                                                        "label": "EXACT(EXACT(cluster.date_filed >= \"2022-01-01\"))",
+                                                        "label": "EXACT(cluster.date_filed >= date \"2022-01-01\")",
                                                         "grain": [
                                                           "cluster"
                                                         ],
                                                         "children": [
                                                           {
                                                             "node_id": "n0a",
-                                                            "label": "EXACT(EXACT(docket.court_id = \"ca9\"))",
+                                                            "label": "EXACT(docket.court_id = \"ca9\")",
                                                             "grain": [
                                                               "cluster"
                                                             ],
@@ -1059,17 +1083,29 @@
                                                               }
                                                             ],
                                                             "node": "exact_filter",
-                                                            "predicate": "EXACT(docket.court_id = \"ca9\")",
+                                                            "predicate": "docket.court_id = \"ca9\"",
+                                                            "sql": "docket.court_id = ?",
+                                                            "params": [
+                                                              "ca9"
+                                                            ],
                                                             "selectivity": 0.11
                                                           }
                                                         ],
                                                         "node": "exact_filter",
-                                                        "predicate": "EXACT(cluster.date_filed >= \"2022-01-01\")",
+                                                        "predicate": "cluster.date_filed >= date \"2022-01-01\"",
+                                                        "sql": "cluster.date_filed >= ?",
+                                                        "params": [
+                                                          "2022-01-01"
+                                                        ],
                                                         "selectivity": 0.34
                                                       }
                                                     ],
                                                     "node": "exact_filter",
-                                                    "predicate": "EXACT(citation.cited_cite = \"490 U.S. 386\")",
+                                                    "predicate": "citation.cited_cite = \"490 U.S. 386\"",
+                                                    "sql": "citation.cited_cite = ?",
+                                                    "params": [
+                                                      "490 U.S. 386"
+                                                    ],
                                                     "selectivity": 0.22
                                                   }
                                                 ],
@@ -1504,7 +1540,7 @@
                                                     ],
                                                     "pushed": [
                                                       "docket.court_id = \"ca9\"",
-                                                      "cluster.date_filed >= \"2022-01-01\"",
+                                                      "cluster.date_filed >= date \"2022-01-01\"",
                                                       "citation.cited_cite = \"490 U.S. 386\""
                                                     ],
                                                     "selectivity": 0.0082,
@@ -1916,7 +1952,7 @@
                                                         ],
                                                         "pushed": [
                                                           "docket.court_id = \"ca9\"",
-                                                          "cluster.date_filed >= \"2022-01-01\"",
+                                                          "cluster.date_filed >= date \"2022-01-01\"",
                                                           "citation.cited_cite = \"490 U.S. 386\""
                                                         ],
                                                         "selectivity": 0.0082,
@@ -2352,7 +2388,7 @@
                                                         ],
                                                         "pushed": [
                                                           "docket.court_id = \"ca9\"",
-                                                          "cluster.date_filed >= \"2022-01-01\"",
+                                                          "cluster.date_filed >= date \"2022-01-01\"",
                                                           "citation.cited_cite = \"490 U.S. 386\""
                                                         ],
                                                         "selectivity": 0.0082,
@@ -2788,7 +2824,7 @@
                                                         ],
                                                         "pushed": [
                                                           "docket.court_id = \"ca9\"",
-                                                          "cluster.date_filed >= \"2022-01-01\"",
+                                                          "cluster.date_filed >= date \"2022-01-01\"",
                                                           "citation.cited_cite = \"490 U.S. 386\""
                                                         ],
                                                         "selectivity": 0.0082,
@@ -3224,7 +3260,7 @@
                                                         ],
                                                         "pushed": [
                                                           "docket.court_id = \"ca9\"",
-                                                          "cluster.date_filed >= \"2022-01-01\"",
+                                                          "cluster.date_filed >= date \"2022-01-01\"",
                                                           "citation.cited_cite = \"490 U.S. 386\""
                                                         ],
                                                         "selectivity": 0.0082,
@@ -3660,7 +3696,7 @@
                                                         ],
                                                         "pushed": [
                                                           "docket.court_id = \"ca9\"",
-                                                          "cluster.date_filed >= \"2022-01-01\"",
+                                                          "cluster.date_filed >= date \"2022-01-01\"",
                                                           "citation.cited_cite = \"490 U.S. 386\""
                                                         ],
                                                         "selectivity": 0.0082,
@@ -4096,7 +4132,7 @@
                                                         ],
                                                         "pushed": [
                                                           "docket.court_id = \"ca9\"",
-                                                          "cluster.date_filed >= \"2022-01-01\"",
+                                                          "cluster.date_filed >= date \"2022-01-01\"",
                                                           "citation.cited_cite = \"490 U.S. 386\""
                                                         ],
                                                         "selectivity": 0.0082,

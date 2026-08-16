@@ -33,8 +33,8 @@
     {"name": "position.person_id", "type": "SCALAR", "description": "Person holding the position."},
     {"name": "position.organization_id", "type": "SCALAR", "description": "Organization for the position."},
     {"name": "position.title", "type": "TEXT", "description": "Position title.", "embeddable": true},
-    {"name": "position.date_start", "type": "SCALAR", "description": "Position start date."},
-    {"name": "position.date_end", "type": "SCALAR", "description": "Position end date."},
+    {"name": "position.date_start", "type": "DATE", "description": "Position start date."},
+    {"name": "position.date_end", "type": "DATE", "description": "Position end date."},
 
     {"name": "proceeding.envelope.id", "type": "SCALAR", "description": "Canonical proceeding UUID."},
     {"name": "proceeding.envelope.source_system", "type": "SCALAR", "description": "Originating source system."},
@@ -43,7 +43,7 @@
     {"name": "proceeding.title", "type": "TEXT", "description": "Case or proceeding title.", "embeddable": true},
     {"name": "proceeding.organization_id", "type": "SCALAR", "description": "Court, chamber, or agency UUID."},
     {"name": "proceeding.party_ids", "type": "SCALAR", "description": "Canonical party UUIDs.", "unit": "item", "fanout": 4.0},
-    {"name": "proceeding.date_filed", "type": "SCALAR", "description": "Filed date."},
+    {"name": "proceeding.date_filed", "type": "DATE", "description": "Filed date."},
     {"name": "proceeding.status", "type": "SCALAR", "description": "Proceeding status."},
     {"name": "proceeding.document_ids", "type": "SCALAR", "description": "Canonical document UUIDs.", "unit": "item", "fanout": 8.0},
 
@@ -55,7 +55,7 @@
     {"name": "document.citation", "type": "SCALAR", "description": "Canonical citation string."},
     {"name": "document.jurisdiction", "type": "SCALAR", "description": "Jurisdiction code."},
     {"name": "document.issuing_body_id", "type": "SCALAR", "description": "Issuing organization UUID."},
-    {"name": "document.date_issued", "type": "SCALAR", "description": "Issue date."},
+    {"name": "document.date_issued", "type": "DATE", "description": "Issue date."},
     {"name": "document.status", "type": "SCALAR", "description": "Publication or lifecycle status."},
     {"name": "document.summary", "type": "TEXT", "description": "Document summary.", "embeddable": true},
     {"name": "document.media.text.plain_text", "type": "TEXT", "description": "Full normalized text body.", "embeddable": true},
@@ -76,7 +76,7 @@
     {"name": "event.event_type", "type": "SCALAR", "description": "Docket entry, vote, hearing, filing, or action."},
     {"name": "event.proceeding_id", "type": "SCALAR", "description": "Parent proceeding UUID."},
     {"name": "event.person_id", "type": "SCALAR", "description": "Related person UUID."},
-    {"name": "event.date", "type": "SCALAR", "description": "Event date."},
+    {"name": "event.date", "type": "DATE", "description": "Event date."},
     {"name": "event.description", "type": "TEXT", "description": "Event description.", "embeddable": true},
     {"name": "event.outcome", "type": "TEXT", "description": "Event outcome."},
 

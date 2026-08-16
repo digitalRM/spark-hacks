@@ -1,6 +1,9 @@
 /** Canonical BQL AST v2 JSON wire format from query_language/serde.py. */
 
-export type Literal = string | number | boolean;
+/** A calendar date. Its own node because a quoted string is text, and text has no order. */
+export type DateLiteral = { kind: "Date"; value: string };
+
+export type Literal = string | number | boolean | DateLiteral;
 
 export type FieldRef = {
   kind: "FieldRef";
@@ -57,6 +60,15 @@ export type BqlQuery = {
   group_by: Expression[];
   limit: number | null;
 };
+
+export function isDateLiteral(value: unknown): value is DateLiteral {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    (value as { kind?: unknown }).kind === "Date" &&
+    typeof (value as { value?: unknown }).value === "string"
+  );
+}
 
 export function isFieldRef(value: unknown): value is FieldRef {
   return (
